@@ -1,8 +1,8 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.2 includes the scalar and relationship/collection phases; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.3 adds portable conditions, accessor strategies, scalar types and text conversion; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
-It includes Magritte containers, a string/Boolean/Int64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
+It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -50,3 +50,5 @@ const auto& target = graph.resolve(ada.readUsing(*spouse));
 auto errors = magritte::validate(*ada.description, ada, {}, &graph);
 auto choices = graph.descriptions.at("status")->allOptions();
 ```
+
+The 0.3 phase adds labelled portable MACondition objects, dictionary/property/selector/variable/identity/null/chain accessors, memo/password/token descriptions, finite binary64, and MAStringReader/Writer behavior. See [portable-behavior.md](docs/portable-behavior.md) for executed GT evidence, APIs, numeric policies and remaining gaps. Graph/3 carries these forms; legacy graph/1 and graph/2 remain readable. Native names require host bindings; callback behavior remains local.

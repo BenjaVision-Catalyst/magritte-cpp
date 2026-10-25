@@ -1,18 +1,22 @@
 #include <magritte/magritte.hpp>
 #include "detail.hpp"
 #include <algorithm>
+#include <cmath>
 
 
 namespace magritte {
-bool Value::isCollection() const { return data.index() == 3 || data.index() == 4 || data.index() == 7; }
+Value::Value(double v) : data(v) { if (!std::isfinite(v)) throw Error("Non-finite float"); }
+bool Value::isCollection() const { return data.index() == 3 || data.index() == 4 || data.index() == 7 || data.index() == 8; }
 std::size_t Value::collectionSize() const {
     if (auto a = std::get_if<Array>(&data)) return a->size();
     if (auto c = std::get_if<Collection>(&data)) return c->elements.size();
+    if (auto s = std::get_if<Symbol>(&data)) return Value(s->utf8).collectionSize();
     if (auto s = std::get_if<std::string>(&data)) return static_cast<std::size_t>(std::count_if(s->begin(), s->end(), [](unsigned char c) { return (c & 0xc0) != 0x80; }));
     throw Error("Value is not a collection");
 }
 Value::Array Value::elements() const {
     if (auto a = std::get_if<Array>(&data)) return *a;
+    if (auto s = std::get_if<Symbol>(&data)) return Value(s->utf8).elements();
     if (auto c = std::get_if<Collection>(&data)) return c->elements;
     if (auto s = std::get_if<std::string>(&data)) {
         Array result;
@@ -37,7 +41,7 @@ Value::Array Value::elements() const {
 }
 namespace detail {
 bool portableLabelKey(const Value& v) {
-    if (v.data.index() == 0 || v.data.index() == 1 || v.data.index() == 5 || v.data.index() == 6) return true;
+    if (v.data.index() == 0 || v.data.index() == 1 || v.data.index() == 5 || v.data.index() == 6 || v.data.index() == 8) return true;
     if (auto i = std::get_if<std::int64_t>(&v.data)) return *i >= -1073741824 && *i <= 1073741823;
     return false;
 }
@@ -56,6 +60,13 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
         case 0: return result;
         case 1: return result + (std::get<bool>(v.data) ? "1" : "0");
         case 2: return result + std::to_string(std::get<std::int64_t>(v.data));
+        case 8: return "3:" + wrap(hex(std::get<Value::Symbol>(v.data).utf8));
+        case 9: {
+            auto n = std::get<double>(v.data);
+            if (!std::isfinite(n)) throw Error("Non-finite float");
+            if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 && std::trunc(n) == n) return "2:" + std::to_string(static_cast<std::int64_t>(n));
+            return result + floatBits(n);
+        }
         case 3: return result + wrap(hex(std::get<std::string>(v.data)));
         case 5: return result + wrap(hex(std::get<Value::Reference>(v.data).id));
         case 6: return result + wrap(hex(std::get<Value::Character>(v.data).utf8));
@@ -87,30 +98,25 @@ bool Description::isMultiple() const { return className == "MAToManyRelationDesc
 std::shared_ptr<Description> Description::referenceDescription() const {
     auto r = reference.lock(); if (!r) throw Error("Reference description is unavailable; retain it in the graph"); return r;
 }
-namespace {
-std::string text(const Value& v, const Description& ref, Limits l, std::size_t& work) {
-    if (detail::valueKey(v, l, work) == detail::valueKey(ref.property("undefinedValue"), l, work)) {
-        auto undefined = ref.property("undefined");
-        if (auto s = std::get_if<std::string>(&undefined.data)) return *s;
-        return "";
-    }
-    if (auto s = std::get_if<std::string>(&v.data)) return *s;
-    if (auto c = std::get_if<Value::Character>(&v.data)) return c->utf8;
-    if (auto i = std::get_if<std::int64_t>(&v.data)) return std::to_string(*i);
-    if (auto b = std::get_if<bool>(&v.data)) return *b ? "true" : "false";
-    throw Error("Unlabelled complex option rendering is not portable");
-}
-}
 std::string Description::labelForOption(const Value& v, Limits l) const {
     std::size_t work = 0; auto key = detail::valueKey(v, l, work);
+    auto bounded = [&](const std::string& text) {
+        if (text.size() > l.bytes || work > l.visits || text.size() > l.visits - work) throw Error("Option label output limit");
+        work += text.size(); return text;
+    };
+    if (className == "MABooleanDescription") {
+        if (auto b = std::get_if<bool>(&v.data)) return bounded(std::get<std::string>(property(*b ? "trueString" : "falseString").data));
+        return bounded(std::get<std::string>(property("undefined").data));
+    }
     if (!isOption()) throw Error("Option operation requires option description");
     for (const auto& label : labels) {
         if (!detail::portableLabelKey(label.first)) throw Error("Identity-sensitive option label key is not portable");
-        if (detail::valueKey(label.first, l, work) == key) return label.second;
+        if (label.first.data.index() == v.data.index() && detail::valueKey(label.first, l, work) == key) return bounded(label.second);
     }
-    return text(v, *referenceDescription(), l, work);
+    return bounded(detail::displayString(v));
 }
 std::vector<Value> Description::allOptionsWith(const Value& current, Limits l) const {
+    if (className == "MABooleanDescription") { if(l.visits<2||l.items<2)throw Error("Boolean option item/work limit");return {Value(false),Value(true)}; }
     std::size_t work = 0;
     bool contains = false; auto key = detail::valueKey(current, l, work);
     for (const auto& option : options) if (detail::valueKey(option, l, work) == key) contains = true;
@@ -120,7 +126,7 @@ std::vector<Value> Description::allOptionsWith(const Value& current, Limits l) c
     if (flag("sorted")) {
         auto ref = referenceDescription();
         auto sortKey = [&](const Value& v) {
-            auto key = text(v, *ref, l, work);
+            auto key = writeString(*ref, v, nullptr, l);
             for (auto& c : key) {
                 if (static_cast<unsigned char>(c) > 127) throw Error("Non-ASCII case-insensitive option sorting is not implemented");
                 if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
@@ -149,4 +155,5 @@ const Model& Graph::resolve(const Value& v) const {
     auto r = std::get_if<Value::Reference>(&v.data);
     if (!r) throw Error("Expected object reference"); return resolve(*r);
 }
+Model& Graph::resolve(const Value& v) { return const_cast<Model&>(static_cast<const Graph&>(*this).resolve(v)); }
 } // namespace magritte
