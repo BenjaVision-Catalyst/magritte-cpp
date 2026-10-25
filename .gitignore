@@ -66,3 +66,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Magritte reference validation
+/conformance/*-mcp-gate.json
+.DS_Store
