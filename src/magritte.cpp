@@ -228,6 +228,8 @@ void supported(const Description &d) {
                 (void)detail::floatBits(*n);
         } else if (k == "label" || k == "comment" || k == "group" || k == "undefined")
             require(v.isNil() || std::holds_alternative<std::string>(v.data), "Expected text property: " + k);
+        else if (k == "name")
+            require(v.isNil() || v.data.index() == 3 || v.data.index() == 8, "Expected description name");
         else if (k != "default" && k != "undefinedValue" && k.rfind("metadata:", 0) != 0)
             throw Error("Unsupported semantic property: " + k);
     }
@@ -520,9 +522,9 @@ Graph Graph::decode(const std::string& input, Limits l) {
             }
             if (d->isRelation()) {
                 require(n.at("classes").is_array(), "Expected classes array");
-                static const std::set<std::string> kinds{"Object", "MABasicObject", "MAAdaptiveModel", "UndefinedObject", "String", "Symbol", "Float", "Boolean", "Number", "Integer", "Character", "Collection", "SequenceableCollection", "Array", "OrderedCollection", "Set", "Bag"};
+                static const std::set<std::string> kinds{"Object", "MABasicObject", "MAAdaptiveModel", "UndefinedObject", "String", "Symbol", "Float", "Boolean", "Number", "Integer", "Character", "Collection", "SequenceableCollection", "Array", "OrderedCollection", "Set", "Bag", "MAObject", "MADescription", "MAElementDescription", "MAReferenceDescription", "MARelationDescription", "MAOptionDescription", "MAMagnitudeDescription", "MAContainer", "MAPriorityContainer", "MAStringDescription", "MASymbolDescription", "MAMemoDescription", "MAPasswordDescription", "MATokenDescription", "MANumberDescription", "MABooleanDescription", "MAToOneRelationDescription", "MAToManyRelationDescription", "MAToManyScalarRelationDescription", "MASingleOptionDescription", "MAMultipleOptionDescription"};
                 std::set<std::string> unique;
-                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format == "magritte.graph/3" || (cls != "Symbol" && cls != "Float")) && kinds.count(cls) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
+                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format == "magritte.graph/3" || (cls != "Symbol" && cls != "Float" && (cls.rfind("MA", 0) != 0 || cls == "MABasicObject" || cls == "MAAdaptiveModel"))) && kinds.count(cls) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
             }
             if (d->isOption()) {
                 require(n.at("options").is_array() && n.at("labels").is_array(), "Expected options and labels arrays");

@@ -79,6 +79,7 @@ struct Condition {
     std::function<bool(const Value&)> test;
 };
 struct Description : Model {
+    bool kindOf(const std::string&) const override;
     std::string id, className = "MAStringDescription", key;
     std::map<std::string, Value> properties;
     std::vector<std::shared_ptr<Description>> children;
@@ -223,6 +224,37 @@ public:
 // Expanded, class-specific metadata descriptions using upstream selector accessors.
 // This returns a graph so its weak reference descriptions retain an owner.
 Graph descriptionModelFor(const Description&, Limits = {});
+// Magritte equality ignores IDs/properties; copies follow postCopy, not deep clone.
+bool descriptionEqual(const Description&, const Description&, Limits = {});
+struct DescriptionCopy {
+    std::shared_ptr<Description> root;
+    // Own copied reference descriptions and shared descendants/references.
+    std::vector<std::shared_ptr<Description>> retained;
+};
+DescriptionCopy copyDescription(std::shared_ptr<Description>, const std::string& newId, Limits = {});
+DescriptionCopy asContainer(std::shared_ptr<Description>, const std::string& newId, Limits = {});
+DescriptionCopy concatenate(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
+DescriptionCopy unionDescriptions(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
+DescriptionCopy intersectDescriptions(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
+DescriptionCopy selectDescriptions(std::shared_ptr<Description>, const std::function<bool(const Description&)>&, const std::string& newId, Limits = {});
+DescriptionCopy copyWithout(std::shared_ptr<Description>, const Description&, const std::string& newId, Limits = {});
+DescriptionCopy copyWithoutAll(std::shared_ptr<Description>, const std::vector<std::shared_ptr<Description>>&, const std::string& newId, Limits = {});
+DescriptionCopy collectDescriptions(std::shared_ptr<Description>, const std::function<std::shared_ptr<Description>(std::shared_ptr<Description>)>&, const std::string& newId, Limits = {});
+DescriptionCopy copyEmpty(std::shared_ptr<Description>, const std::string& newId, Limits = {});
+// Native indices are zero-based half-open, unlike Smalltalk copyFrom:to:.
+DescriptionCopy copyRange(std::shared_ptr<Description>, std::size_t begin, std::size_t end, const std::string& newId, Limits = {});
+// Explicit session for recursively describing and editing description objects.
+// Retains targets; adapters fail after session destruction. Its resolver is local.
+class RecursiveDescriptionModel {
+    struct State;
+    std::shared_ptr<State> state_;
+public:
+    explicit RecursiveDescriptionModel(Limits = {});
+    Graph& resolver();
+    std::shared_ptr<Model> bind(std::shared_ptr<Description>);
+    std::shared_ptr<Description> describe(std::shared_ptr<Description>);
+    Graph schemas() const;
+};
 // MAStringReader/MAStringWriter; these do not validate values or apply defaults.
 Value readString(const Description&, const std::string&, Limits = {});
 std::string writeString(const Description&, const Value&, const Graph* = nullptr, Limits = {});
