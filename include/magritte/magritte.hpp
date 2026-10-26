@@ -282,6 +282,14 @@ struct Description : Model {
     std::string defaultLabel(Limits = {}) const;
     bool hasLabel(Limits = {}) const;
     Value defaultValue() const;
+    Value requiredErrorMessage(Limits = {}) const;
+    Value kindErrorMessage(Limits = {}) const;
+    Value conflictErrorMessage(Limits = {}) const;
+    Value rangeErrorMessage(Limits = {}) const;
+    Description &setRequiredErrorMessage(Value, Limits = {});
+    Description &setKindErrorMessage(Value, Limits = {});
+    Description &setConflictErrorMessage(Value, Limits = {});
+    Description &setRangeErrorMessage(Value, Limits = {});
     Value initialAnswer(Limits = {}) const;
     Description &setInitialAnswer(Value, Limits = {});
     Value lazilyInitializeFrom(const Value &current, Model &, Limits = {}) const;

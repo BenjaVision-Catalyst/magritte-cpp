@@ -29,6 +29,11 @@ bool metadataSelector(const Description &d, const std::string &name, bool writin
     static const std::set<std::string> common{"label",          "comment",           "group",    "required",
                                               "readOnly",       "visible",           "priority", "undefined",
                                               "undefinedValue", "shouldCacheDefault", "stringReader", "stringWriter", "validator"};
+    if (name == "requiredErrorMessage" || name == "kindErrorMessage" ||
+        name == "conflictErrorMessage")
+        return true;
+    if (name == "rangeErrorMessage")
+        return ClassRegistry::global().includesBehavior(d.className, "MAMagnitudeDescription");
     if (common.count(name))
         return true;
     if (name == "initialAnswer")

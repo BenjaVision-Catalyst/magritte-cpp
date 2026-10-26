@@ -290,7 +290,14 @@ void supported(const Description &d) {
             require(v.isNil() || (v.data.index() == 10 &&
                                   detail::knownClass(std::get<Value::Class>(v.data).name)),
                     "Description kind must be Class or nil");
-        else if (k == "initialAnswer")
+        else if (k == "requiredErrorMessage" || k == "kindErrorMessage" ||
+                 k == "conflictErrorMessage" || k == "rangeErrorMessage") {
+            require(k != "rangeErrorMessage" || ClassRegistry::global().includesBehavior(
+                                                    d.className, "MAMagnitudeDescription"),
+                    "Range message requires a magnitude description");
+            require(v.isNil() || std::holds_alternative<std::string>(v.data),
+                    "Error message must be String or nil");
+        } else if (k == "initialAnswer")
             require(!d.isContainer(), "Initial answer requires an element description");
         else if (k == "name")
             require(v.isNil() || v.data.index() == 3 || v.data.index() == 8, "Expected description name");
@@ -326,6 +333,14 @@ bool Description::isContainer() const { return className == "MAContainer" || cla
 Value Description::property(const std::string &name, Limits limits) const {
     if (name == "displayBlockOrSymbol" && displayBlock)
         throw Error("Display block is local; inspect displayBlock rather than a Value snapshot");
+    if (name == "requiredErrorMessage")
+        return requiredErrorMessage(limits);
+    if (name == "kindErrorMessage")
+        return kindErrorMessage(limits);
+    if (name == "conflictErrorMessage")
+        return conflictErrorMessage(limits);
+    if (name == "rangeErrorMessage")
+        return rangeErrorMessage(limits);
     auto it = properties.find(name);
     if (it != properties.end()) {
         if (name == "label" || name == "name")
@@ -460,7 +475,10 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
     std::vector<ValidationError> errors;
     if (!d.flag("visible") || d.flag("readOnly")) return errors;
     checkReferences(v, graph, budget, depth);
-    auto error = [&](std::string code) { errors.push_back({d.id, std::move(code), "Value does not satisfy description"}); };
+    auto error = [&](std::string code) {
+        auto message = detail::validationMessage(d, code, budget.limits);
+        errors.push_back({d.id, std::move(code), std::move(message)});
+    };
     if (d.flag("required") && (v.isNil() || (d.isMultiple() && v.isCollection() && v.collectionSize() == 0))) error("MARequiredError");
     if (detail::valueKey(v, budget.limits, budget.work) == detail::valueKey(d.property("undefinedValue"), budget.limits, budget.work)) return errors;
     if (d.isContainer()) {
@@ -635,13 +653,15 @@ Graph Graph::decode(const std::string& input, Limits l) {
             } else {
                 require(d->className != "MATokenDescription" && d->className != "MASymbolDescription" && d->className != "MAMemoDescription" && d->className != "MAPasswordDescription", "Description requires graph/3");
                 for (const auto &prop : d->properties)
-                    require(prop.first != "separators" && prop.first != "thousandsSeparator" &&
-                                prop.first != "lineCount" && prop.first != "trueString" &&
-                                prop.first != "falseString" && prop.first != "trueStrings" &&
-                                prop.first != "falseStrings" &&
-                                prop.first != "displayBlockOrSymbol" &&
-                                prop.first != "initialAnswer",
-                            "Property requires graph/3");
+                    require(
+                        prop.first != "separators" && prop.first != "thousandsSeparator" &&
+                            prop.first != "lineCount" && prop.first != "trueString" &&
+                            prop.first != "falseString" && prop.first != "trueStrings" &&
+                            prop.first != "falseStrings" && prop.first != "displayBlockOrSymbol" &&
+                            prop.first != "initialAnswer" && prop.first != "requiredErrorMessage" &&
+                            prop.first != "kindErrorMessage" && prop.first != "rangeErrorMessage" &&
+                            prop.first != "conflictErrorMessage",
+                        "Property requires graph/3");
             }
             require(g.descriptions.emplace(d->id, d).second, "Duplicate description identity");
         }

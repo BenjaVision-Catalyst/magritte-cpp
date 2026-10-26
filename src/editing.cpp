@@ -241,6 +241,7 @@ std::vector<ValidationError> CheckedMemento::validate() {
     if (!hasConflict())
         return Memento::validate();
     reset();
-    return {{description_->id, "MAConflictError", "Model changed while editing; memento reset"}};
+    return {{description_->id, "MAConflictError",
+             detail::validationMessage(*description_, "MAConflictError", limits_)}};
 }
 } // namespace magritte

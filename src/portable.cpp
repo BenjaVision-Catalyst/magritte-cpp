@@ -904,6 +904,22 @@ void Description::writeSlot(const std::string &strategy, const std::string &name
             setUndefined(std::move(v));
             return;
         }
+        if (key == "requiredErrorMessage") {
+            setRequiredErrorMessage(std::move(v));
+            return;
+        }
+        if (key == "kindErrorMessage") {
+            setKindErrorMessage(std::move(v));
+            return;
+        }
+        if (key == "conflictErrorMessage") {
+            setConflictErrorMessage(std::move(v));
+            return;
+        }
+        if (key == "rangeErrorMessage") {
+            setRangeErrorMessage(std::move(v));
+            return;
+        }
         if (key == "initialAnswer") {
             setInitialAnswer(std::move(v));
             return;

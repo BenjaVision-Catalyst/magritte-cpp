@@ -19,6 +19,7 @@ std::optional<Value::Fraction> floatFraction(double);
 int compareFractions(const Value &, const Value &);
 Value flattenedPriority(const Value &parent, const Value &child);
 void checkLocalValue(const Value &, Limits = {});
+std::string validationMessage(const Description &, const std::string &code, Limits = {});
 std::string displayString(const Value&);
 bool portableLabelKey(const Value&);
 std::string valueKey(const Value&, Limits, std::size_t&, std::size_t depth = 0);
