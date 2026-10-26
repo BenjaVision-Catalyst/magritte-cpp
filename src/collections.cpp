@@ -5,6 +5,8 @@
 
 
 namespace magritte {
+Value::Value(Class v):data(std::move(v)){if(!detail::knownClass(std::get<Class>(data).name))throw Error("Unknown portable class");}
+
 Value::Value(double v) : data(v) { if (!std::isfinite(v)) throw Error("Non-finite float"); }
 bool Value::isCollection() const { return data.index() == 3 || data.index() == 4 || data.index() == 7 || data.index() == 8; }
 std::size_t Value::collectionSize() const {
@@ -41,7 +43,7 @@ Value::Array Value::elements() const {
 }
 namespace detail {
 bool portableLabelKey(const Value& v) {
-    if (v.data.index() == 0 || v.data.index() == 1 || v.data.index() == 5 || v.data.index() == 6 || v.data.index() == 8) return true;
+    if (v.data.index() == 0 || v.data.index() == 1 || v.data.index() == 5 || v.data.index() == 6 || v.data.index() == 8 || v.data.index() == 10) return true;
     if (auto i = std::get_if<std::int64_t>(&v.data)) return *i >= -1073741824 && *i <= 1073741823;
     return false;
 }
@@ -67,6 +69,7 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
             if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 && std::trunc(n) == n) return "2:" + std::to_string(static_cast<std::int64_t>(n));
             return result + floatBits(n);
         }
+        case 10: {auto name=std::get<Value::Class>(v.data).name;if(!knownClass(name))throw Error("Unknown portable class");return result+wrap(hex(name));}
         case 3: return result + wrap(hex(std::get<std::string>(v.data)));
         case 5: return result + wrap(hex(std::get<Value::Reference>(v.data).id));
         case 6: return result + wrap(hex(std::get<Value::Character>(v.data).utf8));

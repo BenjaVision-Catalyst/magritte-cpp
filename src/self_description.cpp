@@ -6,7 +6,7 @@ namespace magritte {
 namespace detail {
 std::string descriptionType(const Description &d) {
     static const std::map<std::string, std::string> names{
-        {"MAContainer", "Container"},
+        {"MAClassDescription", "Class"}, {"MAContainer", "Container"},
         {"MAPriorityContainer", "Priority Container"},
         {"MAStringDescription", "String"},
         {"MASymbolDescription", "Symbol"},
@@ -28,7 +28,7 @@ std::string descriptionType(const Description &d) {
 bool metadataSelector(const Description &d, const std::string &name, bool writing) {
     static const std::set<std::string> common{"label",          "comment",           "group",    "required",
                                               "readOnly",       "visible",           "priority", "undefined",
-                                              "undefinedValue", "shouldCacheDefault"};
+                                              "undefinedValue", "shouldCacheDefault", "stringReader", "stringWriter", "validator"};
     if (common.count(name))
         return true;
     if (name == "type")
@@ -55,7 +55,7 @@ bool metadataSelector(const Description &d, const std::string &name, bool writin
 } // namespace detail
 Graph descriptionModelFor(const Description &target, Limits limits) {
     (void)detail::descriptionType(target);
-    Graph graph;
+    Graph graph; if(target.className=="MAClassDescription")graph.format="magritte.graph/4";
     graph.root = "meta." + target.className;
     auto root = std::make_shared<Description>();
     root->id = graph.root;

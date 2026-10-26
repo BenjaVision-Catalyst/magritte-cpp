@@ -42,6 +42,7 @@ Value value(const J& j, Limits l, std::size_t depth = 0) {
     keys(j, {"type", "value"});
     const auto& v = j.at("value");
     if (type == "string") return Value(string(v));
+    if (type == "class") return Value(Value::Class{identity(v)});
     if (type == "symbol") return Value(Value::Symbol{string(v)});
     if (type == "float") return Value(detail::floatFromBits(string(v)));
     if (type == "reference") return Value(Value::Reference{identity(v)});
@@ -81,6 +82,7 @@ J wire(const Value& v, Limits l, std::size_t depth = 0) {
         case 3: return J{{"type", "string"}, {"value", std::get<std::string>(v.data)}};
         case 8: return J{{"type", "symbol"}, {"value", std::get<Value::Symbol>(v.data).utf8}};
         case 9: return J{{"type", "float"}, {"value", detail::floatBits(std::get<double>(v.data))}};
+        case 10: {auto name=std::get<Value::Class>(v.data).name;require(detail::knownClass(name),"Unknown portable class");return J{{"type","class"},{"value",name}};}
         case 5: return J{{"type", "reference"}, {"value", identity(J(std::get<Value::Reference>(v.data).id))}};
         case 6: {
             auto text = std::get<Value::Character>(v.data).utf8;
@@ -144,7 +146,8 @@ J accessorWire(const Accessor &a, Limits l, std::size_t depth = 0) {
     J j{{"class", a.className}};
     if (a.className == "MANullAccessor")
         j["uuid"] = wire(a.uuid, l);
-    else if (a.className == "MAChainAccessor") {
+    else if(a.className=="MADelegatorAccessor")return J{{"class",a.className},{"next",accessorWire(a.steps.at(0),l,depth+1)}};
+    if (a.className == "MAChainAccessor") {
         j["steps"] = J::array();
         for (const auto &step : a.steps)
             j["steps"].push_back(accessorWire(step, l, depth + 1));
@@ -164,7 +167,8 @@ Accessor accessorValue(const J &j, Limits l, std::size_t depth = 0) {
     if (a.className == "MANullAccessor") {
         keys(j, {"class", "uuid"});
         a.uuid = value(j.at("uuid"), l);
-    } else if (a.className == "MAChainAccessor") {
+    } else if(a.className=="MADelegatorAccessor"){keys(j,{"class","next"});a.steps.push_back(accessorValue(j.at("next"),l,depth+1));}
+    else if (a.className == "MAChainAccessor") {
         keys(j, {"class", "steps"});
         require(j.at("steps").is_array(), "Expected accessor steps");
         for (const auto &step : j.at("steps"))
@@ -200,7 +204,7 @@ void supported(const Description &d) {
                                                "MAToManyRelationDescription",
                                                "MAToManyScalarRelationDescription",
                                                "MASingleOptionDescription",
-                                               "MAMultipleOptionDescription"};
+                                               "MAMultipleOptionDescription", "MAClassDescription"};
     require(classes.count(d.className), "Unsupported description class: " + d.className);
     for (const auto &p : d.properties) {
         const auto &k = p.first;
@@ -228,6 +232,9 @@ void supported(const Description &d) {
                 (void)detail::floatBits(*n);
         } else if (k == "label" || k == "comment" || k == "group" || k == "undefined")
             require(v.isNil() || std::holds_alternative<std::string>(v.data), "Expected text property: " + k);
+        else if (k == "stringReader" || k == "stringWriter" || k == "validator") {
+            auto cls=std::get_if<Value::Class>(&v.data);require(cls && cls->name==(k=="stringReader"?"MAStringReader":k=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"), "Unsupported interpreter class override");
+        }
         else if (k == "name")
             require(v.isNil() || v.data.index() == 3 || v.data.index() == 8, "Expected description name");
         else if (k != "default" && k != "undefinedValue" && k.rfind("metadata:", 0) != 0)
@@ -262,6 +269,9 @@ bool Description::isContainer() const { return className == "MAContainer" || cla
 Value Description::property(const std::string& name) const {
     auto it = properties.find(name);
     if (it != properties.end()) return it->second;
+    if(name=="stringReader")return Value(Value::Class{"MAStringReader"});
+    if(name=="stringWriter")return Value(Value::Class{"MAStringWriter"});
+    if(name=="validator")return Value(Value::Class{"MAValidatorVisitor"});
     if (name == "separators") return Value(" ,;\r\n\t");
     if (name == "thousandsSeparator") return Value(Value::Character{","});
     if (name == "lineCount") return Value(std::int64_t(3));
@@ -275,7 +285,7 @@ Value Description::property(const std::string& name) const {
     if (name == "shouldCacheDefault") return Value(isRelation() && isMultiple());
     if (name == "priority") return Value(std::int64_t(0));
     if (name == "undefined") return Value("");
-    if (name == "label") return Value(accessor ? accessor->name : key); // Explicit difference: no Smalltalk camel-case inflection yet.
+    if (name == "label") return Value(accessorObject ? accessorObject->value.name : accessor ? accessor->name : key); // Explicit difference: no Smalltalk camel-case inflection yet.
     return {};
 }
 Value Description::defaultValue() const { return defaultFunction ? defaultFunction() : property(isContainer() ? "undefinedValue" : "default"); }
@@ -293,8 +303,8 @@ std::vector<std::shared_ptr<Description>> Description::orderedChildren() const {
     if (className == "MAPriorityContainer") std::stable_sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a->priority() < b->priority(); });
     return result;
 }
-Value Description::readUsing(const Description& d) const { return d.accessor ? d.accessor->read(*this) : property(d.key); }
-void Description::writeUsing(const Description& d, Value v) { if(d.accessor)d.accessor->write(*this,std::move(v));else properties[d.key] = std::move(v); }
+Value Description::readUsing(const Description& d) const { return (d.accessor || d.accessorObject) ? d.effectiveAccessor().read(*this) : property(d.key); }
+void Description::writeUsing(const Description& d, Value v) { if(d.accessor || d.accessorObject)d.effectiveAccessor().write(*this,std::move(v));else properties[d.key] = std::move(v); }
 Value AdaptiveModel::readUsing(const Description& d) const { return lookup(values, d.id); }
 void AdaptiveModel::writeUsing(const Description& d, Value v) { values[d.id] = std::move(v); }
 Value DictionaryModel::readUsing(const Description& d) const { return d.effectiveAccessor().read(*this, resolver); }
@@ -314,6 +324,7 @@ bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
     }
     if (kind == "Object") return true;
     if (kind == "UndefinedObject") return v.isNil();
+    if(kind=="Class" || kind=="Behavior" || kind=="ClassDescription")return v.data.index()==10;
     if (kind == "String") return v.data.index() == 3 || v.data.index() == 8;
     if (kind == "Symbol") return v.data.index() == 8;
     if (kind == "Float") return v.data.index() == 9;
@@ -348,7 +359,7 @@ std::vector<ValidationError> validateModel(const Description& d, const Model& mo
     std::vector<ValidationError> errors;
     for (const auto& c : d.orderedChildren()) {
         std::vector<ValidationError> e;
-        if (c->isContainer() && (model.usesStoredContainerValues() || c->nativeRead || (c->accessor && c->accessor->className != "MAIdentityAccessor")))
+        if (c->isContainer() && (model.usesStoredContainerValues() || c->nativeRead || ((c->accessor || c->accessorObject) && c->effectiveAccessor().className != "MAIdentityAccessor")))
             e = validateField(*c, model.readUsing(*c), graph, budget, depth + 1);
         else e = validateModel(*c, model, graph, budget, depth + 1);
         errors.insert(errors.end(), e.begin(), e.end());
@@ -401,7 +412,7 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
             }
         } else check(v);
     } else {
-        kind = kindOf(v, d.className == "MASymbolDescription" ? "Symbol" : d.className == "MATokenDescription" ? "Array" : d.className == "MANumberDescription" ? "Number" : d.className == "MABooleanDescription" ? "Boolean" : "String", graph);
+        kind = kindOf(v, d.className == "MAClassDescription" ? "Class" : d.className == "MASymbolDescription" ? "Symbol" : d.className == "MATokenDescription" ? "Array" : d.className == "MANumberDescription" ? "Number" : d.className == "MABooleanDescription" ? "Boolean" : "String", graph);
         if (!kind) error("MAKindError");
     }
     if (!kind) return errors;
@@ -462,28 +473,35 @@ Graph Graph::decode(const std::string& input, Limits l) {
     try {
         auto j = parse(input, l);
         keys(j, {"format", "root", "descriptions", "objects"});
-        require(j.at("format") == "magritte.graph/1" || j.at("format") == "magritte.graph/2" || j.at("format") == "magritte.graph/3", "Unsupported format");
+        require(j.at("format") == "magritte.graph/1" || j.at("format") == "magritte.graph/2" || j.at("format") == "magritte.graph/3" || j.at("format") == "magritte.graph/4", "Unsupported format");
+        if(j.at("format")!="magritte.graph/4") {
+            std::function<void(const J&)> legacy=[&](const J& node){
+                if(node.is_object() && ((node.contains("type") && node.at("type").is_string() && node.at("type")=="class") || (node.contains("class") && node.at("class").is_string() && node.at("class")=="MADelegatorAccessor")))throw Error("Class values and delegators require graph/4");
+                if(node.is_structured())for(const auto& child:node)legacy(child);
+            };legacy(j);
+        }
         Graph g; g.format = string(j.at("format")); g.root = identity(j.at("root"));
         require(j.at("descriptions").is_array() && j.at("descriptions").size() <= l.nodes, "Description node limit");
         for (const auto& n : j.at("descriptions")) {
             auto d = std::make_shared<Description>();
             d->id = identity(n.at("id")); d->className = string(n.at("class"));
-            auto shape = n; if (g.format == "magritte.graph/3") shape.erase("conditions");
+            auto shape = n; if (g.format >= "magritte.graph/3") shape.erase("conditions");
             if (d->isContainer()) keys(shape, {"id", "class", "properties", "children"});
             else if (d->isRelation()) keys(shape, {"id", "class", "properties", "accessor", "reference", "classes"});
             else if (d->isOption()) keys(shape, {"id", "class", "properties", "accessor", "reference", "options", "labels"});
             else if (d->className == "MATokenDescription") keys(shape, {"id", "class", "properties", "accessor", "reference"});
             else keys(shape, {"id", "class", "properties", "accessor"});
+            require(g.format == "magritte.graph/4" || d->className != "MAClassDescription", "Class descriptions require graph/4");
             require(g.format != "magritte.graph/1" || !d->isReference(), "Reference descriptions require graph/2");
             require(n.at("properties").is_object(), "Expected properties dictionary");
             for (auto it = n.at("properties").begin(); it != n.at("properties").end(); ++it) { (void)identity(J(it.key())); d->properties.emplace(it.key(), value(it.value(), l)); }
             if (!d->isContainer()) {
                 auto a = accessorValue(n.at("accessor"),l);
-                require(g.format == "magritte.graph/3" || a.className == "MADictionaryAccessor", "Accessor requires graph/3");
+                require(g.format >= "magritte.graph/3" || a.className == "MADictionaryAccessor", "Accessor requires graph/3");
                 if (a.className == "MADictionaryAccessor") d->key = a.name;
                 else d->accessor = a;
             }
-            if (g.format == "magritte.graph/3") {
+            if (g.format >= "magritte.graph/3") {
                 require(n.at("conditions").is_array(),"Expected conditions list");
                 for(const auto& c:n.at("conditions")){ keys(c,{"label","predicate"});d->portableConditions.push_back({string(c.at("label")),predicateValue(c.at("predicate"),l)}); }
             } else {
@@ -524,7 +542,7 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 require(n.at("classes").is_array(), "Expected classes array");
                 static const std::set<std::string> kinds{"Object", "MABasicObject", "MAAdaptiveModel", "UndefinedObject", "String", "Symbol", "Float", "Boolean", "Number", "Integer", "Character", "Collection", "SequenceableCollection", "Array", "OrderedCollection", "Set", "Bag", "MAObject", "MADescription", "MAElementDescription", "MAReferenceDescription", "MARelationDescription", "MAOptionDescription", "MAMagnitudeDescription", "MAContainer", "MAPriorityContainer", "MAStringDescription", "MASymbolDescription", "MAMemoDescription", "MAPasswordDescription", "MATokenDescription", "MANumberDescription", "MABooleanDescription", "MAToOneRelationDescription", "MAToManyRelationDescription", "MAToManyScalarRelationDescription", "MASingleOptionDescription", "MAMultipleOptionDescription"};
                 std::set<std::string> unique;
-                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format == "magritte.graph/3" || (cls != "Symbol" && cls != "Float" && (cls.rfind("MA", 0) != 0 || cls == "MABasicObject" || cls == "MAAdaptiveModel"))) && kinds.count(cls) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
+                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format >= "magritte.graph/3" || (cls != "Symbol" && cls != "Float" && (cls.rfind("MA", 0) != 0 || cls == "MABasicObject" || cls == "MAAdaptiveModel"))) && (kinds.count(cls) || (g.format=="magritte.graph/4" && detail::knownClass(cls))) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
             }
             if (d->isOption()) {
                 require(n.at("options").is_array() && n.at("labels").is_array(), "Expected options and labels arrays");
@@ -576,7 +594,8 @@ Graph Graph::decode(const std::string& input, Limits l) {
         std::function<void(const Value&, std::size_t)> references = [&](const auto& v, auto depth) {
             require(depth <= l.depth && ++graphWork <= l.visits, "Value reference traversal limit");
             if (auto r = std::get_if<Value::Reference>(&v.data)) { require(g.format != "magritte.graph/1", "Object references require graph/2"); (void)g.resolve(*r); }
-            if (v.data.index() == 8 || v.data.index() == 9) require(g.format == "magritte.graph/3", "Symbol/Float requires graph/3");
+            if(v.data.index()==10) require(g.format=="magritte.graph/4", "Class values require graph/4");
+            if (v.data.index() == 8 || v.data.index() == 9) require(g.format >= "magritte.graph/3", "Symbol/Float requires graph/3");
             if (v.data.index() == 6 || v.data.index() == 7) require(g.format != "magritte.graph/1", "Typed collections/characters require graph/2");
             if (v.data.index() == 4 || v.data.index() == 7) for (const auto& e : v.elements()) references(e, depth + 1);
         };
@@ -598,10 +617,11 @@ std::string Graph::encode(Limits l) const {
         for (const auto& p : descriptions) {
             require(bool(p.second) && p.first == p.second->id, "Inconsistent description identity");
             const auto& d = *p.second; supported(d); detail::checkPortableDescription(d,l,portableWork);
+            require(!d.accessorObject, "Live accessor identity is local; materialize an explicit snapshot before export");
             require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction, "Local executable behavior is not portable");
             J n{{"id", d.id}, {"class", d.className}, {"properties", J::object()}};
             for (const auto& prop : d.properties) n["properties"][prop.first] = wire(prop.second, l);
-            if (format == "magritte.graph/3") {
+            if (format >= "magritte.graph/3") {
                 n["conditions"] = J::array();
                 for(const auto& c:d.portableConditions)n["conditions"].push_back(J{{"label",c.label},{"predicate",predicateWire(c.predicate,l)}});
             } else require(d.portableConditions.empty(),"Conditions require graph/3");

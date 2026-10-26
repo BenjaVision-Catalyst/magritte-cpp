@@ -1,6 +1,7 @@
 #pragma once
 #include <magritte/magritte.hpp>
 namespace magritte::detail {
+bool knownClass(const std::string&);
 bool shouldWrite(const Description&, const Value&, const Value&, Limits, std::size_t&);
 std::string descriptionType(const Description&);
 bool metadataSelector(const Description&, const std::string&, bool writing);

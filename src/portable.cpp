@@ -154,6 +154,7 @@ void checkAccessor(const Accessor &a, Work &w, std::size_t depth) {
                      std::get<std::int64_t>(e.data) <= 255,
                  "Invalid UUID byte");
     }
+    if (a.className == "MADelegatorAccessor") { need(a.steps.size()==1 && a.name.empty() && a.writeName.empty(),"Invalid delegator accessor");checkAccessor(a.steps.front(),w,depth+1);return; }
     if (a.className == "MAChainAccessor") {
         need(a.steps.size() >= 2 && a.name.empty() && a.writeName.empty(), "Invalid chain accessor");
         for (const auto &step : a.steps)
@@ -192,6 +193,7 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
         throw Error("MAReadError: null accessor");
     if (a.className == "MAIdentityAccessor")
         return identity(m, g, w);
+    if(a.className=="MADelegatorAccessor")return accessRead(a.steps.front(),m,g,w,depth+1);
     if (a.className != "MAChainAccessor")
         return m.readSlot(a.className, a.name);
     const Model *target = &m;
@@ -209,6 +211,7 @@ void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::s
     w.tick(depth);
     if (a.className == "MANullAccessor" || a.className == "MAIdentityAccessor")
         throw Error("MAWriteError: read-only accessor");
+    if(a.className=="MADelegatorAccessor"){accessWrite(a.steps.front(),m,std::move(v),g,w,depth+1);return;}
     if (a.className != "MAChainAccessor") {
         m.writeSlot(a.className, a.className == "MASelectorAccessor" ? a.writeName : a.name, std::move(v));
         return;
@@ -363,7 +366,7 @@ std::string writeModel(const Description &d, const Model &model, const Graph *g,
         if (!child->flag("visible"))
             continue;
         if (child->isContainer() && !model.usesStoredContainerValues() && !child->nativeRead &&
-            (!child->accessor || child->accessor->className == "MAIdentityAccessor"))
+            ((!child->accessor && !child->accessorObject) || child->effectiveAccessor().className == "MAIdentityAccessor"))
             result += writeModel(*child, model, g, w, depth + 1);
         else
             result += write(*child, model.readUsing(*child), g, w, depth + 1, true);
@@ -380,6 +383,7 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
     else if (d.isContainer()) {
         need(g, "Container writer requires graph resolver");
         result = writeModel(d, g->resolve(v), g, w, depth + 1);
+    } else if(d.className=="MAClassDescription"){auto cls=std::get_if<Value::Class>(&v.data);need(cls && detail::knownClass(cls->name),"Class writer requires a portable Class");result=cls->name;
     } else if (d.className == "MABooleanDescription") {
         need(v.data.index() == 1, "Boolean writer requires Boolean");
         result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
@@ -438,6 +442,7 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
         result = std::to_string(*i);
     else if (auto n = std::get_if<double>(&v.data))
         result = detail::floatText(*n);
+    else if(auto cls=std::get_if<Value::Class>(&v.data))result=cls->name;
     else if (auto b = std::get_if<bool>(&v.data))
         result = *b ? "true" : "false";
     else
@@ -451,7 +456,8 @@ namespace detail {
 void checkPortableDescription(const Description &d, Limits l, std::size_t &work) {
     Work w{l, work};
     w.tick(0);
-    if (d.accessor)
+    if(d.accessorObject) checkAccessor(d.effectiveAccessor(),w,0);
+    else if (d.accessor)
         checkAccessor(*d.accessor, w, 0);
     for (const auto &c : d.portableConditions)
         checkPredicate(c.predicate, w, 0);
@@ -522,6 +528,7 @@ std::string displayString(const Value &v) {
         return *s;
     if (auto s = std::get_if<Value::Symbol>(&v.data))
         return s->utf8;
+    if(auto cls=std::get_if<Value::Class>(&v.data))return cls->name;
     if (auto s = std::get_if<Value::Character>(&v.data))
         return s->utf8;
     if (auto i = std::get_if<std::int64_t>(&v.data))
@@ -592,6 +599,7 @@ void Model::writeSlot(const std::string &, const std::string &, Value) {
     throw Error("Unbound accessor write");
 }
 Accessor Description::effectiveAccessor() const {
+    if(accessorObject)return accessorObject->snapshot();
     if (accessor)
         return *accessor;
     Accessor a;
@@ -614,6 +622,7 @@ void Description::writeSlot(const std::string &strategy, const std::string &name
     if(strategy == "MASelectorAccessor") {
         need(!name.empty() && name.back()==':', "Description setter requires a keyword selector");
         auto key=name.substr(0,name.size()-1);need(detail::metadataSelector(*this,key,true),"Unsupported description setter");
+        if(key=="stringReader"||key=="stringWriter"||key=="validator"){auto cls=std::get_if<Value::Class>(&v.data);need(cls && cls->name==(key=="stringReader"?"MAStringReader":key=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"),"Unsupported interpreter class");}
         if(key=="default")defaultFunction={};
         properties[key]=std::move(v);return;
     }

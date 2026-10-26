@@ -16,7 +16,7 @@ struct Work {
         b.check(limits);
         if (a.className != b.className)
             return false;
-        if (a.className == "MAChainAccessor") {
+        if (a.className == "MAChainAccessor" || a.className=="MADelegatorAccessor") {
             if (a.steps.size() != b.steps.size())
                 return false;
             for (std::size_t i = 0; i < a.steps.size(); ++i)
@@ -115,6 +115,7 @@ DescriptionCopy copy(std::shared_ptr<Description> source, const std::string &id,
                 throw Error("Recursive reference postCopy is unsupported; copy is not a graph deep clone");
             auto n = std::make_shared<Description>(*d);
             n->id = nextId;
+            if(d->accessorObject){n->accessorObject=AccessorObject::fromAccessor(nextId+".accessor",d->accessorObject->snapshot(l),l);n->accessor.reset();}
             result.retained.push_back(n);
             if (d->isReference())
                 n->reference = clone(d->referenceDescription(), nextId + ".reference", depth + 1);
@@ -131,7 +132,7 @@ std::vector<std::shared_ptr<Description>> fields(const std::shared_ptr<Descripti
 }
 } // namespace
 bool Description::kindOf(const std::string &name) const {
-    return name == "Object" || name == "MAObject" || name == "MADescription" || name == className ||
+    return name == "Object" || name == "MABasicObject" || name == "MAObject" || name == "MADescription" || name == className ||
            (name == "MAElementDescription" && !isContainer()) || (name == "MAContainer" && isContainer()) ||
            (name == "MAReferenceDescription" && isReference()) ||
            (name == "MARelationDescription" && isRelation()) ||

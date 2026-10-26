@@ -12,12 +12,13 @@
 namespace magritte {
 // Portable numbers are signed Int64 and finite IEEE-754 binary64.
 struct Value {
+    struct Class { std::string name; };
     struct Reference { std::string id; bool operator==(const Reference& r) const { return id == r.id; } };
     struct Character { std::string utf8; bool operator==(const Character& c) const { return utf8 == c.utf8; } };
     struct Symbol { std::string utf8; };
     struct Collection { std::string kind; std::vector<Value> elements; };
     using Array = std::vector<Value>;
-    std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character, Collection, Symbol, double> data;
+    std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character, Collection, Symbol, double, Class> data;
     Value() = default;
     explicit Value(bool v) : data(v) {}
     explicit Value(std::int64_t v) : data(v) {}
@@ -29,6 +30,7 @@ struct Value {
     explicit Value(Collection v) : data(std::move(v)) {}
     explicit Value(Symbol v) : data(std::move(v)) {}
     explicit Value(double v);
+    explicit Value(Class v);
     bool isCollection() const;
     Array elements() const;
     std::size_t collectionSize() const;
@@ -44,6 +46,8 @@ struct Limits {
 struct ValidationError {
     std::string descriptionId, code, message;
 };
+struct AccessorObject;
+struct ConditionObject;
 struct Description;
 struct Graph;
 struct Accessor {
@@ -91,6 +95,9 @@ struct Description : Model {
     std::vector<Condition> conditions;
     std::vector<PortableCondition> portableConditions;
     std::optional<Accessor> accessor;
+    // Live accessor identity is local; materialize explicitly before graph export.
+    std::shared_ptr<AccessorObject> accessorObject;
+    void materializeAccessor(Limits = {});
     Accessor effectiveAccessor() const;
     std::function<Value(const void*)> nativeRead;
     std::function<void(void*, const Value&)> nativeWrite;
@@ -243,6 +250,20 @@ DescriptionCopy collectDescriptions(std::shared_ptr<Description>, const std::fun
 DescriptionCopy copyEmpty(std::shared_ptr<Description>, const std::string& newId, Limits = {});
 // Native indices are zero-based half-open, unlike Smalltalk copyFrom:to:.
 DescriptionCopy copyRange(std::shared_ptr<Description>, std::size_t begin, std::size_t end, const std::string& newId, Limits = {});
+// Finite registry of portable native equivalents of upstream class objects.
+std::vector<std::string> portableClasses();
+struct AccessorObject {
+    std::string id;
+    Accessor value; // Leaf state, or className for chain/delegator nodes.
+    std::shared_ptr<AccessorObject> accessor, next;
+    static std::shared_ptr<AccessorObject> fromAccessor(const std::string&, const Accessor&, Limits = {});
+    Accessor snapshot(Limits = {}) const;
+};
+struct ConditionObject {
+    std::string id;
+    Predicate predicate;
+    bool evaluate(const Value& value, Limits limits = {}) const { return predicate.evaluate(value, limits); }
+};
 // Explicit session for recursively describing and editing description objects.
 // Retains targets; adapters fail after session destruction. Its resolver is local.
 class RecursiveDescriptionModel {
@@ -253,6 +274,11 @@ public:
     Graph& resolver();
     std::shared_ptr<Model> bind(std::shared_ptr<Description>);
     std::shared_ptr<Description> describe(std::shared_ptr<Description>);
+    std::shared_ptr<Description> describeReflective(std::shared_ptr<Description>);
+    std::shared_ptr<Model> bind(std::shared_ptr<AccessorObject>);
+    std::shared_ptr<Model> bind(std::shared_ptr<ConditionObject>);
+    std::shared_ptr<Description> describe(std::shared_ptr<AccessorObject>);
+    std::shared_ptr<Description> describe(std::shared_ptr<ConditionObject>);
     Graph schemas() const;
 };
 // MAStringReader/MAStringWriter; these do not validate values or apply defaults.

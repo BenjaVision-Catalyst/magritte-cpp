@@ -72,12 +72,105 @@ Graph expanded(const Description &target, Limits limits) {
     // Root insertion order follows the explicitly selected upstream methods.
     return graph;
 }
+
+const std::vector<std::string> accessorClasses{
+    "MADictionaryAccessor", "MAPropertyAccessor", "MASelectorAccessor",  "MAVariableAccessor",
+    "MANullAccessor",       "MAIdentityAccessor", "MADelegatorAccessor", "MAChainAccessor"};
+std::shared_ptr<Description> addMetadata(Graph &g, const std::string &key, const std::string &cls,
+                                         std::optional<std::int64_t> priority = {}) {
+    auto d = std::make_shared<Description>();
+    d->id = g.root + "." + key;
+    d->className = cls;
+    Accessor a;
+    a.className = "MASelectorAccessor";
+    a.name = key;
+    a.writeName = key + ":";
+    d->accessor = a;
+    if (priority)
+        d->properties["priority"] = Value(*priority);
+    g.descriptions.at(g.root)->children.push_back(d);
+    g.descriptions.emplace(d->id, d);
+    if (d->isReference()) {
+        auto ref = std::make_shared<Description>();
+        ref->id = d->id + ".reference";
+        Accessor null;
+        null.className = "MANullAccessor";
+        ref->accessor = null;
+        d->reference = ref;
+        g.descriptions.emplace(ref->id, ref);
+    }
+    return d;
+}
+Graph objectMetadata(const std::string &cls) {
+    Graph g;
+    g.format = "magritte.graph/4";
+    g.root = "meta." + cls;
+    auto root = std::make_shared<Description>();
+    root->id = g.root;
+    root->className = "MAContainer";
+    root->properties["label"] = Value(cls);
+    g.descriptions.emplace(root->id, root);
+    return g;
+}
+Graph reflected(const Description &target, Limits limits) {
+    auto g = expanded(target, limits);
+    g.format = "magritte.graph/4";
+    for (auto &p : g.descriptions)
+        if (p.second->isRelation() && p.first != g.root &&
+            p.first.find(".reference.reference") == std::string::npos) {
+            auto &names = p.second->classes;
+            if (!names.empty() && std::find(names.begin(), names.end(), "MAStringDescription") != names.end())
+                names.push_back("MAClassDescription");
+        }
+    auto a = addMetadata(g, "accessor", "MAToOneRelationDescription", 10);
+    a->classes = accessorClasses;
+    for (const auto &key : {"stringReader", "stringWriter", "validator"}) {
+        auto cls = std::string(key) == "stringReader"   ? "MAStringReader"
+                   : std::string(key) == "stringWriter" ? "MAStringWriter"
+                                                        : "MAValidatorVisitor";
+        auto d = addMetadata(g, key, "MASingleOptionDescription",
+                             std::string(key) == "stringReader"   ? 300
+                             : std::string(key) == "stringWriter" ? 310
+                                                                  : 250);
+        d->properties["label"] = Value(std::string(key) == "stringReader"   ? "String Reader"
+                                       : std::string(key) == "stringWriter" ? "String Writer"
+                                                                            : "Validator");
+        d->properties["default"] = Value(Value::Class{cls});
+        d->options = {Value(Value::Class{cls})};
+        d->referenceDescription()->className = "MAClassDescription";
+    }
+    if (target.isRelation()) {
+        auto d = addMetadata(g, "classes", "MAMultipleOptionDescription", 400);
+        d->properties["label"] = Value("Classes");
+        d->properties["default"] = Value(Value::Collection{"set", {}});
+        d->referenceDescription()->className = "MAClassDescription";
+        for (const auto &name : portableClasses())
+            d->options.push_back(Value(Value::Class{name}));
+    }
+    return g;
+}
+Graph accessorMetadata(const AccessorObject &object) {
+    auto cls = object.value.className;
+    auto g = objectMetadata(cls);
+    if (cls == "MADictionaryAccessor" || cls == "MAPropertyAccessor")
+        addMetadata(g, "key", "MASymbolDescription")->properties["required"] = Value(true);
+    if (cls == "MASelectorAccessor")
+        addMetadata(g, "selector", "MASymbolDescription");
+    if (cls == "MAChainAccessor" || cls == "MADelegatorAccessor") {
+        addMetadata(g, "next", "MAToOneRelationDescription", 100)->classes = accessorClasses;
+        if (cls == "MAChainAccessor")
+            addMetadata(g, "accessor", "MAToOneRelationDescription", 200)->classes = accessorClasses;
+    }
+    return g;
+}
 } // namespace
 struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
     Graph graph;
     Limits limits;
     std::size_t generation = 0;
     std::set<std::string> metaIds;
+    std::map<std::string, std::shared_ptr<AccessorObject>> accessors;
+    std::map<std::string, std::shared_ptr<ConditionObject>> conditions;
     struct Binding : Model {
         std::weak_ptr<State> owner;
         std::shared_ptr<Description> target;
@@ -107,6 +200,28 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             auto s = state();
             if (strategy != "MASelectorAccessor")
                 return target->readSlot(strategy, name);
+            if (name == "accessor") {
+                if (target->nativeRead || target->nativeWrite)
+                    throw Error("Local callbacks are not reflective accessor objects");
+                if (!target->accessorObject) {
+                    auto key = target->id + ".accessor";
+                    std::size_t serial = 1;
+                    while (s->graph.nativeObjects.count(key))
+                        key = target->id + ".accessor." + std::to_string(++serial);
+                    auto candidate =
+                        AccessorObject::fromAccessor(key, target->effectiveAccessor(), s->limits);
+                    s->bindAccessor(candidate);
+                    target->accessorObject = candidate;
+                }
+                s->bindAccessor(target->accessorObject);
+                return Value(Value::Reference{target->accessorObject->id});
+            }
+            if (name == "classes" && target->isRelation()) {
+                Value::Array values;
+                for (const auto &cls : target->classes)
+                    values.push_back(Value(Value::Class{cls}));
+                return Value(Value::Collection{"set", values});
+            }
             if (name == "children" && target->isContainer()) {
                 Value::Array values;
                 for (const auto &d : target->orderedChildren())
@@ -143,6 +258,28 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             auto s = state();
             if (strategy != "MASelectorAccessor") {
                 target->writeSlot(strategy, name, std::move(v));
+                return;
+            }
+            if (name == "accessor:") {
+                auto ref = std::get_if<Value::Reference>(&v.data);
+                if (!ref || !s->accessors.count(ref->id))
+                    throw Error("Accessor requires a bound accessor object");
+                target->accessorObject = s->accessors.at(ref->id);
+                target->accessor.reset();
+                return;
+            }
+            if (name == "classes:" && target->isRelation()) {
+                if (!v.isCollection() || v.collectionSize() > s->limits.items)
+                    throw Error("Classes require a bounded collection");
+                std::vector<std::string> names;
+                std::set<std::string> unique;
+                for (const auto &item : v.elements()) {
+                    auto cls = std::get_if<Value::Class>(&item.data);
+                    if (!cls || !detail::knownClass(cls->name) || !unique.insert(cls->name).second)
+                        throw Error("Classes require unique supported class values");
+                    names.push_back(cls->name);
+                }
+                target->classes = std::move(names);
                 return;
             }
             if (name == "setChildren:" && target->isContainer()) {
@@ -210,7 +347,193 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             d.effectiveAccessor().write(*this, std::move(v), &s->graph, s->limits);
         }
     };
+
+    struct AccessorBinding : Model {
+        std::weak_ptr<State> owner;
+        std::shared_ptr<AccessorObject> target;
+        AccessorBinding(std::shared_ptr<State> s, std::shared_ptr<AccessorObject> a) : owner(s), target(a) {}
+        std::shared_ptr<State> state() const {
+            auto s = owner.lock();
+            if (!s)
+                throw Error("Recursive metadata session expired");
+            return s;
+        }
+        bool kindOf(const std::string &cls) const override {
+            return cls == "Object" || cls == "MABasicObject" || cls == "MAObject" || cls == "MAAccessor" ||
+                   cls == target->value.className ||
+                   (cls == "MADictionaryAccessor" && target->value.className == "MAPropertyAccessor") ||
+                   (cls == "MADelegatorAccessor" && target->value.className == "MAChainAccessor");
+        }
+        Value readSlot(const std::string &strategy, const std::string &name) const override {
+            auto s = state();
+            if (strategy != "MASelectorAccessor")
+                throw Error("Accessor metadata requires selector access");
+            auto cls = target->value.className;
+            if ((name == "key" && (cls == "MADictionaryAccessor" || cls == "MAPropertyAccessor")) ||
+                (name == "selector" && cls == "MASelectorAccessor"))
+                return Value(Value::Symbol{target->value.name});
+            auto node = name == "next" ? target->next : name == "accessor" ? target->accessor : nullptr;
+            if (!node)
+                throw Error("Unsupported accessor metadata getter");
+            s->bindAccessor(node);
+            return Value(Value::Reference{node->id});
+        }
+        void writeSlot(const std::string &strategy, const std::string &name, Value value) override {
+            auto s = state();
+            if (strategy != "MASelectorAccessor")
+                throw Error("Accessor metadata requires selector access");
+            auto cls = target->value.className;
+            if ((name == "key:" && (cls == "MADictionaryAccessor" || cls == "MAPropertyAccessor")) ||
+                (name == "selector:" && cls == "MASelectorAccessor")) {
+                std::string text;
+                if (auto symbol = std::get_if<Value::Symbol>(&value.data))
+                    text = symbol->utf8;
+                else if (auto str = std::get_if<std::string>(&value.data))
+                    text = *str;
+                else
+                    throw Error("Accessor name requires Symbol or String");
+                auto next = target->value;
+                next.name = text;
+                if (name == "selector:")
+                    next.writeName = text + ":";
+                next.check(s->limits);
+                target->value = std::move(next);
+                return;
+            }
+            auto ref = std::get_if<Value::Reference>(&value.data);
+            if (!ref || !s->accessors.count(ref->id))
+                throw Error("Accessor slot requires a bound accessor");
+            auto node = s->accessors.at(ref->id);
+            if ((name == "next:" && (cls == "MAChainAccessor" || cls == "MADelegatorAccessor")) ||
+                (name == "accessor:" && cls == "MAChainAccessor")) {
+                auto &slot = name == "next:" ? target->next : target->accessor;
+                auto old = slot;
+                slot = node;
+                try {
+                    (void)target->snapshot(s->limits);
+                } catch (...) {
+                    slot = old;
+                    throw;
+                }
+                return;
+            }
+            throw Error("Unsupported accessor metadata setter");
+        }
+        Value readUsing(const Description &d) const override {
+            auto s = state();
+            auto v = d.effectiveAccessor().read(*this, &s->graph, s->limits);
+            (void)encodeValue(v, s->limits);
+            return v;
+        }
+        void writeUsing(const Description &d, Value v) override {
+            auto s = state();
+            (void)encodeValue(v, s->limits);
+            d.effectiveAccessor().write(*this, std::move(v), &s->graph, s->limits);
+        }
+    };
+    struct ConditionBinding : Model {
+        std::weak_ptr<State> owner;
+        std::shared_ptr<ConditionObject> target;
+        ConditionBinding(std::shared_ptr<State> s, std::shared_ptr<ConditionObject> p)
+            : owner(s), target(p) {}
+        bool kindOf(const std::string &cls) const override {
+            return cls == "Object" || cls == "MABasicObject" || cls == "MAObject" || cls == "MACondition" ||
+                   cls == target->predicate.className;
+        }
+        Value readUsing(const Description &) const override {
+            if (owner.expired())
+                throw Error("Recursive metadata session expired");
+            throw Error("Upstream condition objects have no annotated fields");
+        }
+        void writeUsing(const Description &, Value) override {
+            if (owner.expired())
+                throw Error("Recursive metadata session expired");
+            throw Error("Upstream condition objects have no annotated fields");
+        }
+    };
+    void checkId(const std::string &id) const {
+        if (id.empty() || id.size() > limits.bytes ||
+            !std::all_of(id.begin(), id.end(), [](unsigned char c) { return c >= 33 && c <= 126; }))
+            throw Error("Invalid reflection identity");
+    }
+    std::shared_ptr<Model> bindAccessor(std::shared_ptr<AccessorObject> target) {
+        if (!target)
+            throw Error("Null accessor object");
+        (void)target->snapshot(limits);
+        std::map<std::string, std::shared_ptr<AccessorObject>> pending;
+        std::set<const AccessorObject *> seen;
+        std::function<void(std::shared_ptr<AccessorObject>)> walk = [&](auto a) {
+            if (!seen.insert(a.get()).second)
+                return;
+            checkId(a->id);
+            if ((pending.count(a->id) && pending.at(a->id) != a) ||
+                (accessors.count(a->id) && accessors.at(a->id) != a) || graph.descriptions.count(a->id) ||
+                conditions.count(a->id) || (graph.nativeObjects.count(a->id) && !accessors.count(a->id)))
+                throw Error("Reflection identity collision");
+            pending.emplace(a->id, a);
+            if (a->accessor)
+                walk(a->accessor);
+            if (a->next)
+                walk(a->next);
+        };
+        walk(target);
+        std::size_t added = 0;
+        for (const auto &p : pending)
+            if (!accessors.count(p.first))
+                ++added;
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + added > limits.nodes)
+            throw Error("Reflection node limit");
+        for (const auto &p : pending) {
+            accessors.emplace(p);
+            if (!graph.nativeObjects.count(p.first))
+                graph.nativeObjects.emplace(p.first,
+                                            std::make_shared<AccessorBinding>(shared_from_this(), p.second));
+        }
+        return graph.nativeObjects.at(target->id);
+    }
+    std::shared_ptr<Model> bindCondition(std::shared_ptr<ConditionObject> target) {
+        if (!target)
+            throw Error("Null condition object");
+        target->predicate.check(limits);
+        checkId(target->id);
+        if ((graph.nativeObjects.count(target->id) && !conditions.count(target->id)) ||
+            graph.descriptions.count(target->id) || accessors.count(target->id) ||
+            (conditions.count(target->id) && conditions.at(target->id) != target))
+            throw Error("Reflection identity collision");
+        if (!conditions.count(target->id) &&
+            graph.descriptions.size() + accessors.size() + conditions.size() >= limits.nodes)
+            throw Error("Reflection node limit");
+        conditions.emplace(target->id, target);
+        if (!graph.nativeObjects.count(target->id))
+            graph.nativeObjects.emplace(target->id,
+                                        std::make_shared<ConditionBinding>(shared_from_this(), target));
+        return graph.nativeObjects.at(target->id);
+    }
+    std::shared_ptr<Description> publish(Graph next, const std::string &targetId, const std::string &family) {
+        auto root = next.descriptions.at(next.root);
+        auto prefix = family + "." + std::to_string(generation + 1) + "." + targetId;
+        auto old = next.root;
+        std::map<std::string, std::shared_ptr<Description>> renamed;
+        for (auto &p : next.descriptions) {
+            p.second->id = prefix + p.first.substr(old.size());
+            renamed.emplace(p.second->id, p.second);
+        }
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + renamed.size() > limits.nodes)
+            throw Error("Recursive metadata node limit");
+        for (const auto &p : renamed)
+            if (graph.nativeObjects.count(p.first))
+                throw Error("Generated metadata identity collision");
+        bind(root);
+        for (const auto &p : renamed)
+            metaIds.insert(p.first);
+        ++generation;
+        graph.root = root->id;
+        if (next.format == "magritte.graph/4")
+            graph.format = next.format;
+        return root;
+    }
     explicit State(Limits l) : limits(l) {}
+
     std::shared_ptr<Model> bind(std::shared_ptr<Description> target) {
         if (!target)
             throw Error("Null metadata target");
@@ -226,6 +549,9 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             if ((pending.count(d->id) && pending.at(d->id) != d) ||
                 (graph.descriptions.count(d->id) && graph.descriptions.at(d->id) != d))
                 throw Error("Metadata target identity already bound");
+            if ((graph.nativeObjects.count(d->id) && !graph.descriptions.count(d->id)) ||
+                accessors.count(d->id) || conditions.count(d->id))
+                throw Error("Reflection identity collision");
             pending.emplace(d->id, d);
             for (const auto &c : d->children)
                 walk(c);
@@ -237,7 +563,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         for (const auto &p : pending)
             if (!graph.descriptions.count(p.first))
                 ++added;
-        if (graph.descriptions.size() + added > limits.nodes)
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + added > limits.nodes)
             throw Error("Recursive metadata node limit");
         for (const auto &p : pending) {
             graph.descriptions.emplace(p);
@@ -254,30 +580,31 @@ std::shared_ptr<Model> RecursiveDescriptionModel::bind(std::shared_ptr<Descripti
 }
 std::shared_ptr<Description> RecursiveDescriptionModel::describe(std::shared_ptr<Description> target) {
     state_->bind(target);
-    auto next = expanded(*target, state_->limits);
-    auto root = next.descriptions.at(next.root);
-    auto old = next.root;
-    auto prefix = "recursive." + std::to_string(state_->generation + 1) + "." + target->id;
-    std::map<std::string, std::shared_ptr<Description>> renamed;
-    for (auto &p : next.descriptions) {
-        p.second->id = prefix + p.first.substr(old.size());
-        renamed.emplace(p.second->id, p.second);
-    }
-    // Preflight all identities and aggregate capacity before publishing a level.
-    if (state_->graph.descriptions.size() + renamed.size() > state_->limits.nodes)
-        throw Error("Recursive metadata node limit");
-    for (const auto &p : renamed)
-        if (state_->graph.descriptions.count(p.first))
-            throw Error("Generated metadata identity collision");
-    state_->bind(root);
-    for (const auto &p : renamed)
-        state_->metaIds.insert(p.first);
-    ++state_->generation;
-    state_->graph.root = root->id;
-    return root;
+    return state_->publish(expanded(*target, state_->limits), target->id, "recursive");
 }
+std::shared_ptr<Description>
+RecursiveDescriptionModel::describeReflective(std::shared_ptr<Description> target) {
+    state_->bind(target);
+    return state_->publish(reflected(*target, state_->limits), target->id, "reflective");
+}
+std::shared_ptr<Model> RecursiveDescriptionModel::bind(std::shared_ptr<AccessorObject> a) {
+    return state_->bindAccessor(a);
+}
+std::shared_ptr<Model> RecursiveDescriptionModel::bind(std::shared_ptr<ConditionObject> c) {
+    return state_->bindCondition(c);
+}
+std::shared_ptr<Description> RecursiveDescriptionModel::describe(std::shared_ptr<AccessorObject> a) {
+    state_->bindAccessor(a);
+    return state_->publish(accessorMetadata(*a), a->id, "reflective");
+}
+std::shared_ptr<Description> RecursiveDescriptionModel::describe(std::shared_ptr<ConditionObject> c) {
+    state_->bindCondition(c);
+    return state_->publish(objectMetadata(c->predicate.className), c->id, "reflective");
+}
+
 Graph RecursiveDescriptionModel::schemas() const {
     Graph result;
+    result.format = state_->graph.format;
     result.root = state_->graph.root;
     for (const auto &id : state_->metaIds)
         result.descriptions.emplace(id, state_->graph.descriptions.at(id));
