@@ -1,6 +1,6 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.18 adds description display selectors and native blocks; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.19 adds accessor-based comparison and sortability queries; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
@@ -82,3 +82,5 @@ Builder composition, flattener extension hooks, exact priorities and GT evidence
 Runtime method registration, recursive discovery, defining contexts and the deferred fresh-GT verification are documented in [pragma-discovery.md](docs/pragma-discovery.md).
 
 Description display conversion, option label/sort behavior, source evidence and native API boundaries are documented in [display.md](docs/display.md). GT was not accessed for this phase.
+
+The MASortBlock protocol, Value-target accessors and source/native verification are documented in [sorting.md](docs/sorting.md). GT was not accessed for this phase.

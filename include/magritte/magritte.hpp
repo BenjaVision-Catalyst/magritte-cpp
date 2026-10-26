@@ -175,6 +175,7 @@ struct Accessor {
     std::optional<std::string> kind; // MACompositeAccessor's unannotated class slot
     bool canRead(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     bool canWrite(const struct Model &, const Graph * = nullptr, Limits = {}) const;
+    Value readValue(const Value &, const Graph * = nullptr, Limits = {}) const;
     Value read(const struct Model&, const Graph* = nullptr, Limits = {}) const;
     void write(struct Model&, Value, Graph* = nullptr, Limits = {}) const;
     Value accessorName(Limits = {}) const;
@@ -192,6 +193,7 @@ struct DisplayBlock {
 };
 struct Model {
     virtual ~Model() = default;
+    virtual Value binaryMessage(const std::string &, const Value &, const Graph * = nullptr) const;
     virtual Value displayMessage(const std::string &, const Description *argument = nullptr) const;
     virtual bool usesStoredContainerValues() const { return false; }
     virtual bool kindOf(const std::string& name) const { return ClassRegistry::global().includesBehavior("Object", name); }
@@ -249,6 +251,7 @@ struct Description : Model {
     std::function<Value(const void*)> nativeRead;
     std::function<void(void*, const Value&)> nativeWrite;
     std::function<Value()> defaultFunction;
+    virtual bool isSortable() const;
     bool isContainer() const;
     bool isRelation() const;
     bool isOption() const;
@@ -298,6 +301,8 @@ class NativeModel : public Model {
     void* object_;
     std::vector<std::string> classes_;
 public:
+    std::map<std::string, std::function<Value(const void*, const Value&, const Graph*)>> binaryReaders;
+    Value binaryMessage(const std::string&, const Value&, const Graph* = nullptr) const override;
     std::map<std::string, std::function<Value(const void*, const Description*)>> displayReaders;
     Value displayMessage(const std::string&, const Description* argument = nullptr) const override;
     Graph* resolver = nullptr;
@@ -672,6 +677,21 @@ struct AccessorObject {
     std::shared_ptr<AccessorObject> accessor, next;
     static std::shared_ptr<AccessorObject> fromAccessor(const std::string&, const Accessor&, Limits = {});
     Accessor snapshot(Limits = {}) const;
+};
+// MASortBlock is a local valuable; its message result is not restricted to Boolean.
+class SortBlock {
+    std::shared_ptr<AccessorObject> accessor_;
+    std::string selector_;
+
+  public:
+    explicit SortBlock(std::string selector);
+    SortBlock(Accessor, std::string selector);
+    SortBlock(std::shared_ptr<AccessorObject>, std::string selector);
+    const std::shared_ptr<AccessorObject> &accessor() const { return accessor_; }
+    const std::string &selector() const { return selector_; }
+    const SortBlock &fixTemps() const { return *this; } // upstream no-op returns self
+    Value value(const Value &, const Value &, const Graph * = nullptr, Limits = {}) const;
+    Value value(const Model &, const Model &, const Graph * = nullptr, Limits = {}) const;
 };
 struct ConditionObject {
     std::string id;

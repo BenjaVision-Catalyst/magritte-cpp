@@ -33,7 +33,7 @@ bool metadataSelector(const Description &d, const std::string &name, bool writin
         return true;
     if (name == "name")
         return true;
-    if (name == "defaultLabel" || name == "hasLabel")
+    if (name == "defaultLabel" || name == "hasLabel" || name == "isSortable")
         return !writing;
     if (name == "type")
         return !writing;

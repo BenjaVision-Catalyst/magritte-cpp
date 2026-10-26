@@ -252,6 +252,22 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
     }
     return result;
 }
+Value accessReadValue(const Accessor &a, const Value &value, const Graph *graph, Work &work,
+                      std::size_t depth) {
+    work.tick(depth);
+    if (a.className == "MAIdentityAccessor")
+        return value;
+    if (a.className == "MADelegatorAccessor")
+        return accessReadValue(a.steps.front(), value, graph, work, depth + 1);
+    if (a.className == "MAChainAccessor") {
+        auto result = value;
+        for (const auto &step : a.steps)
+            result = accessReadValue(step, result, graph, work, depth + 1);
+        return result;
+    }
+    need(graph, "Value accessor requires graph resolver");
+    return accessRead(a, graph->resolve(value), graph, work, depth + 1);
+}
 void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::size_t depth) {
     w.tick(depth);
     if (a.className == "MAPluggableAccessor") {
@@ -759,6 +775,14 @@ void Accessor::check(Limits l) const {
     Work w{l};
     checkAccessor(*this, w, 0);
 }
+Value Accessor::readValue(const Value &value, const Graph *graph, Limits limits) const {
+    Work work{limits};
+    checkAccessor(*this, work, 0);
+    detail::checkLocalValue(value, limits);
+    auto result = accessReadValue(*this, value, graph, work, 0);
+    detail::checkLocalValue(result, limits);
+    return result;
+}
 Value Accessor::read(const Model &m, const Graph *g, Limits l) const {
     Work w{l};
     checkAccessor(*this, w, 0);
@@ -858,6 +882,8 @@ Value Description::readSlot(const std::string &strategy, const std::string &name
         need(detail::metadataSelector(*this,name,false), "Unsupported description getter");
         if (name == "defaultLabel")
             return Value(defaultLabel());
+        if (name == "isSortable")
+            return Value(isSortable());
         if (name == "hasLabel")
             return Value(hasLabel());
         if(name=="type")return Value(detail::descriptionType(*this));
