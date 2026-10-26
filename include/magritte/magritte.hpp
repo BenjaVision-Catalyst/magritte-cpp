@@ -780,6 +780,15 @@ public:
     Graph bootstrap(const std::string& id, std::shared_ptr<Memento>);
     Graph schemas() const;
 };
+// Object's Magritte model protocol with an explicitly supplied description/provider.
+// Providers run once. These operations do not validate or apply memento cooking.
+Model &initializeMagritte(Model &, const Description &, Limits = {});
+Model &initializeMagritte(Model &, const std::function<std::shared_ptr<Description>()> &,
+                          Limits = {});
+bool isSameAs(const Model &, const Model &, const Description &, const Graph * = nullptr,
+              Limits = {});
+bool isSameAs(const Model &, const Model &, const std::function<std::shared_ptr<Description>()> &,
+              const Graph * = nullptr, Limits = {});
 // MAStringReader/MAStringWriter; these do not validate values or apply defaults.
 Value readString(const Description&, const std::string&, Limits = {});
 std::string writeString(const Description&, const Value&, const Graph* = nullptr, Limits = {});

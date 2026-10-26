@@ -1,6 +1,6 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.24 adds described-object printing and local print hooks; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.25 adds model initialization and described comparison; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
@@ -94,3 +94,5 @@ Nil-only lazy initialization, the raw stored-property bridge and initial-answer 
 Description error-message overrides, generated numeric range text, source evidence and exception-profile boundaries are documented in [messages.md](docs/messages.md). GT was not accessed for this phase.
 
 Described-object printing, nil/separator/read ordering, local formatter hooks and native stream boundaries are documented in [printing.md](docs/printing.md). GT was not accessed for this phase.
+
+Default initialization and nil/default-aware model comparison are documented in [model-protocol.md](docs/model-protocol.md), including provider evaluation, host equality, existing adapter gaps and source-derived evidence. GT was not accessed for this phase.
