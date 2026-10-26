@@ -26,10 +26,27 @@ J fixture(const std::string &n) {
     in >> r;
     return r;
 }
+// Historical GT snapshots have an explicit class environment; registrations remain global.
+J projected(J names) {
+    static const auto available = fixture("reflection-reference").at("registry");
+    J result = J::array();
+    for (const auto& name : names)
+        if (std::find(available.begin(), available.end(), name) != available.end()) result.push_back(name);
+    return result;
+}
 J canonical(J j) {
-    for (auto &d : j["descriptions"])
-        if (d.contains("classes"))
-            std::sort(d["classes"].begin(), d["classes"].end());
+    for (auto& d : j["descriptions"]) {
+        if (d.contains("classes")) {
+            d["classes"] = projected(d["classes"]);
+            std::sort(d["classes"].begin(),d["classes"].end());
+        }
+        if (d.contains("options")) {
+            J options = J::array();
+            for(const auto& option : d["options"])
+                if(option.at("type")!="class" || !projected(J::array({option.at("value")})).empty()) options.push_back(option);
+            d["options"] = options;
+        }
+    }
     return j;
 }
 Value value(const J &j) { return decodeValue(j.dump()); }

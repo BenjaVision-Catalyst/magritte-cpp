@@ -118,7 +118,9 @@ struct Condition {
     std::string label;
     std::function<bool(const Value&)> test;
 };
+class Visitor;
 struct Description : Model {
+    virtual void acceptMagritte(Visitor&);
     bool kindOf(const std::string&) const override;
     std::string id, className = "MAStringDescription", key;
     std::map<std::string, Value> properties;
@@ -286,6 +288,63 @@ struct DescriptionCopy {
     std::shared_ptr<Description> root;
     // Own copied reference descriptions and shared descendants/references.
     std::vector<std::shared_ptr<Description>> retained;
+};
+// MAVisitor dispatches one description. Child/reference traversal belongs to the visitor.
+class Visitor {
+    std::size_t depth_ = 0, work_ = 0;
+    void enter();
+    void leave() noexcept { --depth_; }
+protected:
+    Limits limits_;
+public:
+    explicit Visitor(Limits limits = {}) : limits_(limits) {}
+    virtual ~Visitor() = default;
+    virtual void visit(Description&);
+    virtual void visitAll(const std::vector<std::shared_ptr<Description>>&);
+    virtual void visitDescription(Description&);
+    virtual void visitContainer(Description&);
+    virtual void visitPriorityContainer(Description&);
+    virtual void visitElementDescription(Description&);
+    virtual void visitBooleanDescription(Description&);
+    virtual void visitClassDescription(Description&);
+    virtual void visitStringDescription(Description&);
+    virtual void visitMemoDescription(Description&);
+    virtual void visitPasswordDescription(Description&);
+    virtual void visitSymbolDescription(Description&);
+    virtual void visitMagnitudeDescription(Description&);
+    virtual void visitNumberDescription(Description&);
+    virtual void visitReferenceDescription(Description&);
+    virtual void visitTokenDescription(Description&);
+    virtual void visitOptionDescription(Description&);
+    virtual void visitSingleOptionDescription(Description&);
+    virtual void visitMultipleOptionDescription(Description&);
+    virtual void visitRelationDescription(Description&);
+    virtual void visitToOneRelationDescription(Description&);
+    virtual void visitToManyRelationDescription(Description&);
+    virtual void visitToManyScalarRelationDescription(Description&);
+};
+// MADescriptionBuilder's stateful copy/enrichment protocol. Model pointers are borrowed.
+class DescriptionBuilder : public Visitor {
+    DescriptionCopy result_;
+    std::map<const Description*, std::shared_ptr<Description>> owners_;
+    std::map<std::string, const Description*> identities_;
+    std::string prefix_;
+    std::size_t serial_ = 0;
+    void remember(std::shared_ptr<Description>);
+    std::shared_ptr<Description> copyForBuild(std::shared_ptr<Description>);
+protected:
+    std::shared_ptr<Description> ownedDescription(Description&) const;
+public:
+    using Visitor::Visitor;
+    Model* target = nullptr;
+    Model* model = nullptr;
+    std::int64_t priority = 0;
+    const std::shared_ptr<Description>& builtDescription() const { return result_.root; }
+    void setBuiltDescription(std::shared_ptr<Description>);
+    // New IDs use newIdPrefix.N. A suppressed visit can leave result.root null.
+    DescriptionCopy buildFrom(std::shared_ptr<Description>, const std::string& newIdPrefix, Model* target = nullptr);
+    void visitContainer(Description&) override;
+    void visitDescription(Description&) override;
 };
 DescriptionCopy copyDescription(std::shared_ptr<Description>, const std::string& newId, Limits = {});
 DescriptionCopy asContainer(std::shared_ptr<Description>, const std::string& newId, Limits = {});

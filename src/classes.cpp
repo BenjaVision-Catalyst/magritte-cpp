@@ -88,6 +88,7 @@ ClassRegistry::ClassRegistry() : state_(std::make_unique<State>()) {
          {"MAContainer", "MADescription", false, "Container"},
          {"MADelegatorAccessor", "MAAccessor", false, "Delegator Accessor"},
          {"MADescription", "MAObject", true, "Description"},
+         {"MADescriptionBuilder", "MAVisitor", false, "Description Builder"},
          {"MADictionaryAccessor", "MAAccessor", false, "Dictionary Accessor"},
          {"MAElementDescription", "MADescription", true, "Element Description"},
          {"MAIdentityAccessor", "MAAccessor", false, "Identity Accessor"},
