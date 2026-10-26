@@ -891,8 +891,7 @@ Value Description::readSlot(const std::string &strategy, const std::string &name
         auto value=property(name);if(name=="undefined"&&value.isNil())return Value("");return value;
     }
     need(strategy == "MAPropertyAccessor", "Description slot requires property accessor");
-    auto it = properties.find(name);
-    return it == properties.end() ? Value() : it->second;
+    return propertyAt(name, [] { return Value(); });
 }
 void Description::writeSlot(const std::string &strategy, const std::string &name, Value v) {
     if(strategy == "MASelectorAccessor") {
@@ -907,7 +906,7 @@ void Description::writeSlot(const std::string &strategy, const std::string &name
         properties[key]=std::move(v);return;
     }
     need(strategy == "MAPropertyAccessor", "Description slot requires property accessor");
-    properties[name] = std::move(v);
+    (void)propertyPut(name, std::move(v));
 }
 Value DictionaryModel::readSlot(const std::string &strategy, const std::string &name) const {
     need(strategy == "MADictionaryAccessor", "Dictionary slot requires dictionary accessor");

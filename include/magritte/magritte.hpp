@@ -264,6 +264,20 @@ struct Description : Model {
     std::string labelForOption(const Value &, Limits = {}, const Graph * = nullptr) const;
     std::string obfuscated(const Value&, Limits = {}) const;
     bool isObfuscated(const Value&) const;
+    bool hasProperty(const std::string &) const;
+    Value propertyAt(const std::string &, Limits = {}) const;
+    Value propertyAt(const std::string &, const std::function<Value()> &ifAbsent,
+                     Limits = {}) const;
+    Value propertyAtIfAbsentPut(const std::string &, const std::function<Value()> &, Limits = {});
+    Value propertyAtIfPresent(const std::string &, const std::function<Value(const Value &)> &,
+                              Limits = {}) const;
+    Value propertyAtIfPresentOrElse(const std::string &,
+                                    const std::function<Value(const Value &)> &,
+                                    const std::function<Value()> &, Limits = {}) const;
+    Value propertyAtIfPresentOrPut(const std::string &, const std::function<Value(const Value &)> &,
+                                   const std::function<Value()> &, Limits = {});
+    Value propertyPut(const std::string &, Value, Limits = {});
+    Value propertyPutRemovingNil(const std::string &, Value, Limits = {});
     Value property(const std::string &, Limits = {}) const;
     std::string defaultLabel(Limits = {}) const;
     bool hasLabel(Limits = {}) const;
