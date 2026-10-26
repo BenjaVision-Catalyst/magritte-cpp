@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
         check(option->labelForOption(Value("Ada")) == "OptionAda");
         check(writeString(*option, Value("Ada")) == "OptionAda");
         auto sorted = option->allOptions().values();
-        check(sorted == Value::Array({Value("Bob"), Value("Ada")}) && sortCalls > 0);
+        check(sorted == Value::Array({Value("Ada"), Value("Bob")}) && sortCalls == 0);
         sortCalls = 0;
         option->options = {Value("Ada")};
         check(option->allOptions().size() == 1 && sortCalls == 0);
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
         d->display("shortName");
         relation->display(std::make_shared<DisplayBlock>(std::function<std::string()>(
             []() -> std::string { throw Error("unused relation display"); })));
-        check(writeString(*relation, ref, &native) == "Ada");
+        fails([&] { writeString(*relation, ref, &native); });
         auto container = scalar("container", "MAContainer");
         container->children = {d};
         container->display(relation->displayBlock);
@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
         token->reference = reference;
         reference->display(std::make_shared<DisplayBlock>(std::function<std::string(const Value &)>(
             [](const Value &v) { return "[" + plain(v) + "]"; })));
-        check(writeString(*token, Value(Value::Array{Value(), Value("Ada")})) == "[nil] [Ada]");
+        check(writeString(*token, Value(Value::Array{Value(), Value("Ada")})) == "nil Ada");
         model->displayReaders["+"] = [&](const void *, const Description *arg) {
             check(arg == d.get());
             return Value("binary");

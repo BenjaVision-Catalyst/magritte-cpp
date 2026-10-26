@@ -115,9 +115,6 @@ bool Description::isRelation() const {
 }
 bool Description::isOption() const { return className == "MASingleOptionDescription" || className == "MAMultipleOptionDescription"; }
 bool Description::isMultiple() const { return className == "MAToManyRelationDescription" || className == "MAToManyScalarRelationDescription" || className == "MAMultipleOptionDescription"; }
-std::shared_ptr<Description> Description::referenceDescription() const {
-    auto r = reference.lock(); if (!r) throw Error("Reference description is unavailable; retain it in the graph"); return r;
-}
 std::string Description::labelForOption(const Value &v, Limits l, const Graph *graph) const {
     std::size_t work = 0; auto key = detail::valueKey(v, l, work);
     auto bounded = [&](const std::string& text) {
@@ -156,9 +153,8 @@ Options Description::allOptionsWith(const Value &current, Limits l, const Graph 
     auto result = options.values(l);
     if (flag("extensible") && !current.isNil() && !contains) result.push_back(current);
     if (flag("sorted")) {
-        auto ref = referenceDescription();
         auto sortKey = [&](const Value &v) {
-            auto key = writeString(*ref, v, graph, l);
+            auto key = writeString(*referenceDescription(), v, graph, l);
             for (auto& c : key) {
                 if (static_cast<unsigned char>(c) > 127)
                     throw Error("Non-ASCII case-insensitive option sorting is not implemented");

@@ -517,7 +517,6 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
     }
     if (d.className == "MATokenDescription" || d.className == "MAMultipleOptionDescription") {
         Value::Array result;
-        auto ref = d.referenceDescription();
         if (d.className == "MATokenDescription") {
             auto separators = Value(propText(d, "separators")).elements();
             std::string token;
@@ -526,18 +525,19 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
                 if (std::find(separators.begin(), separators.end(), c) == separators.end())
                     token += std::get<Value::Character>(c.data).utf8;
                 else if (!token.empty()) {
-                    result.push_back(read(*ref, token, w, depth + 1, true));
+                    result.push_back(read(*d.referenceDescription(), token, w, depth + 1, true));
                     token.clear();
                 }
             }
             if (!token.empty())
-                result.push_back(read(*ref, token, w, depth + 1, true));
+                result.push_back(read(*d.referenceDescription(), token, w, depth + 1, true));
         } else
             for (std::size_t start = 0; start < input.size();) {
                 auto end = input.find(',', start);
                 if (end == std::string::npos)
                     end = input.size();
-                result.push_back(read(*ref, input.substr(start, end - start), w, depth + 1, true));
+                result.push_back(read(*d.referenceDescription(), input.substr(start, end - start),
+                                      w, depth + 1, true));
                 start = end + 1;
                 if (start < input.size() && input[start] == ' ')
                     ++start;
@@ -600,7 +600,6 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
     } else if (d.className == "MATokenDescription" || d.isMultiple()) {
         need(v.isCollection(), "Collection writer requires collection");
         need(v.collectionSize() <= w.l.visits - w.n, "Writer collection work limit");
-        auto ref = d.referenceDescription();
         std::string sep = ", ";
         if (d.className == "MATokenDescription" && v.collectionSize() > 1) {
             auto chars = Value(propText(d, "separators")).elements();
@@ -620,7 +619,8 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
                     one.className = "MASingleOptionDescription";
                     result += write(one, e, g, w, depth + 1, false);
                 } else
-                    result += write(*ref, e, g, w, depth + 1, d.className != "MATokenDescription");
+                    result += write(*d.referenceDescription(), e, g, w, depth + 1,
+                                    d.className != "MATokenDescription");
                 need(result.size() <= w.l.bytes, "String output byte limit");
             }
         }
@@ -899,6 +899,10 @@ void Description::writeSlot(const std::string &strategy, const std::string &name
         need(!name.empty() && name.back()==':', "Description setter requires a keyword selector");
         auto key=name.substr(0,name.size()-1);need(detail::metadataSelector(*this,key,true),"Unsupported description setter");
         if(key=="stringReader"||key=="stringWriter"||key=="validator"){auto cls=std::get_if<Value::Class>(&v.data);need(cls && cls->name==(key=="stringReader"?"MAStringReader":key=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"),"Unsupported interpreter class");}
+        if (key == "undefined") {
+            setUndefined(std::move(v));
+            return;
+        }
         if(key=="default")defaultFunction={};
         properties[key]=std::move(v);return;
     }

@@ -299,7 +299,7 @@ void supported(const Description &d) {
             "Portable container conditions require a model message protocol");
     require(d.isContainer() || d.children.empty(), "Scalar cannot contain children");
     if (d.isReference())
-        (void)d.referenceDescription();
+        (void)detail::referenceTarget(d);
     else
         require(d.reference.expired(), "Reference slot requires a reference description");
     require(d.isRelation() || d.classes.empty(), "Classes require a relation");
@@ -546,7 +546,8 @@ void visit(const Description& root, const std::function<void(const Description&)
         require(seen.size() <= l.nodes, "Description node limit");
         composition(d, 0); f(d);
         for (const auto& c : d.orderedChildren()) walk(*c, depth + 1);
-        if (d.isReference()) walk(*d.referenceDescription(), depth + 1);
+        if (d.isReference())
+            walk(*detail::referenceTarget(d), depth + 1);
     };
     walk(root, 0);
 }
@@ -778,7 +779,7 @@ std::string Graph::encode(Limits l) const {
                 }
             } else n["accessor"] = accessorWire(d.effectiveAccessor(),l);
             if (d.isReference()) {
-                auto r = d.referenceDescription();
+                auto r = detail::referenceTarget(d);
                 require(descriptions.count(r->id) && descriptions.at(r->id) == r, "Unregistered reference description");
                 n["reference"] = r->id;
             }

@@ -258,6 +258,7 @@ struct Description : Model {
     bool isReference() const { return isRelation() || isOption() || className == "MATokenDescription"; }
     bool isMultiple() const;
     std::shared_ptr<Description> referenceDescription() const;
+    Description &setUndefined(Value, Limits = {});
     Options allOptions(Limits = {}, const Graph * = nullptr) const;
     Options allOptionsWith(const Value &, Limits = {}, const Graph * = nullptr) const;
     std::string labelForOption(const Value &, Limits = {}, const Graph * = nullptr) const;

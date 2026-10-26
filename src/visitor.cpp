@@ -1,4 +1,4 @@
-#include <magritte/magritte.hpp>
+#include "detail.hpp"
 #include <algorithm>
 #include <set>
 
@@ -102,7 +102,8 @@ void DescriptionBuilder::remember(std::shared_ptr<Description> source, bool refr
             result_.retained.push_back(d);
         identities_.emplace(d->id, d.get());
         for (const auto& child : d->children) pending.emplace_back(child, entry.second + 1);
-        if (d->isReference()) pending.emplace_back(d->referenceDescription(), entry.second + 1);
+        if (d->isReference())
+            pending.emplace_back(detail::referenceTarget(*d), entry.second + 1);
     }
 }
 std::shared_ptr<Description> DescriptionBuilder::ownedDescription(Description& d) const {

@@ -124,13 +124,13 @@ Graph reflected(const Description &target, Limits limits) {
         d->options.clear();
         for (const auto &name : registry.withAllSubclasses(cls))
             d->options.push_back(Value(Value::Class{name}));
-        d->referenceDescription()->className = "MAClassDescription";
+        detail::referenceTarget(*d)->className = "MAClassDescription";
     }
     if (target.isRelation()) {
         auto d = addMetadata(g, "classes", "MAMultipleOptionDescription", 400);
         d->properties["label"] = Value("Classes");
         d->properties["default"] = Value(Value::Collection{"set", {}});
-        d->referenceDescription()->className = "MAClassDescription";
+        detail::referenceTarget(*d)->className = "MAClassDescription";
         for (const auto &name : registry.allClasses())
             d->options.push_back(Value(Value::Class{name}));
     }
@@ -642,7 +642,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             for (const auto &c : d->children)
                 walk(c);
             if (d->isReference())
-                walk(d->referenceDescription());
+                walk(detail::referenceTarget(*d));
         };
         walk(target);
         std::size_t added = 0;
@@ -725,7 +725,7 @@ Graph RecursiveDescriptionModel::schemas() const {
         for (const auto &c : d->orderedChildren())
             include(c, depth + 1);
         if (d->isReference())
-            include(d->referenceDescription(), depth + 1);
+            include(detail::referenceTarget(*d), depth + 1);
     };
     for (const auto &id : state_->metaIds)
         include(state_->graph.descriptions.at(id), 0);
