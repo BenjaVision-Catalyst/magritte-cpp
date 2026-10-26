@@ -282,6 +282,10 @@ struct Description : Model {
     std::string defaultLabel(Limits = {}) const;
     bool hasLabel(Limits = {}) const;
     Value defaultValue() const;
+    Value initialAnswer(Limits = {}) const;
+    Description &setInitialAnswer(Value, Limits = {});
+    Value lazilyInitializeFrom(const Value &current, Model &, Limits = {}) const;
+    Value maLazyPropertyUsing(const Description &, Limits = {});
     bool isIgnorableValue(const Value&, Limits = {}) const;
     bool shouldWrite(const Value& candidate, const Value& previous, Limits = {}) const;
     bool flag(const std::string&) const;

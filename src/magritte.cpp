@@ -290,6 +290,8 @@ void supported(const Description &d) {
             require(v.isNil() || (v.data.index() == 10 &&
                                   detail::knownClass(std::get<Value::Class>(v.data).name)),
                     "Description kind must be Class or nil");
+        else if (k == "initialAnswer")
+            require(!d.isContainer(), "Initial answer requires an element description");
         else if (k == "name")
             require(v.isNil() || v.data.index() == 3 || v.data.index() == 8, "Expected description name");
         else if (k != "default" && k != "undefinedValue" && k.rfind("metadata:", 0) != 0)
@@ -350,6 +352,8 @@ Value Description::property(const std::string &name, Limits limits) const {
     }
     if (name == "displayBlockOrSymbol")
         return Value(Value::Symbol{"greaseString"});
+    if (name == "initialAnswer")
+        return initialAnswer(limits);
     if(name=="stringReader")return Value(Value::Class{"MAStringReader"});
     if(name=="stringWriter")return Value(Value::Class{"MAStringWriter"});
     if(name=="validator")return Value(Value::Class{"MAValidatorVisitor"});
@@ -635,7 +639,8 @@ Graph Graph::decode(const std::string& input, Limits l) {
                                 prop.first != "lineCount" && prop.first != "trueString" &&
                                 prop.first != "falseString" && prop.first != "trueStrings" &&
                                 prop.first != "falseStrings" &&
-                                prop.first != "displayBlockOrSymbol",
+                                prop.first != "displayBlockOrSymbol" &&
+                                prop.first != "initialAnswer",
                             "Property requires graph/3");
             }
             require(g.descriptions.emplace(d->id, d).second, "Duplicate description identity");

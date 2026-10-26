@@ -31,6 +31,8 @@ bool metadataSelector(const Description &d, const std::string &name, bool writin
                                               "undefinedValue", "shouldCacheDefault", "stringReader", "stringWriter", "validator"};
     if (common.count(name))
         return true;
+    if (name == "initialAnswer")
+        return !d.isContainer();
     if (name == "name")
         return true;
     if (name == "defaultLabel" || name == "hasLabel" || name == "isSortable")

@@ -888,6 +888,8 @@ Value Description::readSlot(const std::string &strategy, const std::string &name
             return Value(hasLabel());
         if(name=="type")return Value(detail::descriptionType(*this));
         if(name=="default")return defaultValue();
+        if (name == "initialAnswer")
+            return initialAnswer();
         auto value=property(name);if(name=="undefined"&&value.isNil())return Value("");return value;
     }
     need(strategy == "MAPropertyAccessor", "Description slot requires property accessor");
@@ -900,6 +902,10 @@ void Description::writeSlot(const std::string &strategy, const std::string &name
         if(key=="stringReader"||key=="stringWriter"||key=="validator"){auto cls=std::get_if<Value::Class>(&v.data);need(cls && cls->name==(key=="stringReader"?"MAStringReader":key=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"),"Unsupported interpreter class");}
         if (key == "undefined") {
             setUndefined(std::move(v));
+            return;
+        }
+        if (key == "initialAnswer") {
+            setInitialAnswer(std::move(v));
             return;
         }
         if(key=="default")defaultFunction={};
