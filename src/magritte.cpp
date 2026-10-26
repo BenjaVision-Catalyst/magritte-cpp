@@ -143,6 +143,8 @@ Predicate predicateValue(const J &j, Limits l, std::size_t depth = 0) {
 }
 J accessorWire(const Accessor &a, Limits l, std::size_t depth = 0) {
     require(depth <= l.depth, "Accessor depth limit");
+    require(a.className != "MAPluggableAccessor",
+            "Pluggable accessor blocks are local and cannot be exported");
     J j{{"class", a.className}};
     if (a.className == "MANullAccessor")
         j["uuid"] = wire(a.uuid, l);
@@ -164,6 +166,7 @@ Accessor accessorValue(const J &j, Limits l, std::size_t depth = 0) {
     require(depth <= l.depth, "Accessor depth limit");
     Accessor a;
     a.className = string(j.at("class"));
+    require(a.className != "MAPluggableAccessor", "Pluggable accessor blocks cannot be imported");
     if (a.className == "MANullAccessor") {
         keys(j, {"class", "uuid"});
         a.uuid = value(j.at("uuid"), l);

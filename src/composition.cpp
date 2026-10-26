@@ -24,6 +24,8 @@ struct Work {
                     return false;
             return true;
         }
+        if (a.className == "MAPluggableAccessor")
+            return a.readBlock == b.readBlock && a.writeBlock == b.writeBlock;
         if (a.className == "MANullAccessor")
             return detail::valueKey(a.uuid, limits, count) == detail::valueKey(b.uuid, limits, count);
         return detail::valueKey(Value(a.name), limits, count) ==
@@ -134,6 +136,10 @@ std::vector<std::shared_ptr<Description>> fields(const std::shared_ptr<Descripti
 } // namespace
 bool Description::kindOf(const std::string &name) const {
     return ClassRegistry::global().includesBehavior(className,name);
+}
+bool accessorEqual(const Accessor &a, const Accessor &b, Limits limits) {
+    Work work{limits};
+    return work.accessor(a, b, 0);
 }
 bool descriptionEqual(const Description &a, const Description &b, Limits l) {
     Work work{l};

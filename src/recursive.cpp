@@ -239,7 +239,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                 if (i != target->properties.end())
                     return i->second;
                 auto a = target->effectiveAccessor();
-                if (a.className == "MAIdentityAccessor" || a.className == "MANullAccessor")
+                if (a.className == "MAIdentityAccessor" || a.className == "MANullAccessor" ||
+                    a.className == "MAPluggableAccessor")
                     return {};
                 return a.className != "MAVariableAccessor" ? Value(Value::Symbol{a.name}) : Value(a.name);
             }

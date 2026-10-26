@@ -145,6 +145,15 @@ bool predicate(const Predicate &p, const Value &input, Work &w, std::size_t dept
 }
 void checkAccessor(const Accessor &a, Work &w, std::size_t depth) {
     w.tick(depth);
+    need(a.className == "MAPluggableAccessor" || (!a.readBlock && !a.writeBlock),
+         "Blocks require a pluggable accessor");
+    if (a.className == "MAPluggableAccessor") {
+        need(a.name.empty() && a.writeName.empty() && a.uuid.isNil() && a.steps.empty(),
+             "Invalid pluggable accessor shape");
+        need(!a.readBlock || static_cast<bool>(*a.readBlock), "Empty read callable");
+        need(!a.writeBlock || static_cast<bool>(*a.writeBlock), "Empty write callable");
+        return;
+    }
     need(a.className == "MANullAccessor" || a.uuid.isNil(), "Unexpected null accessor token");
     (void)detail::valueKey(a.uuid, w.l, w.n);
     if (!a.uuid.isNil()) {
@@ -189,6 +198,13 @@ Value identity(const Model &m, const Graph *g, Work &w) {
 }
 Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std::size_t depth) {
     w.tick(depth);
+    if (a.className == "MAPluggableAccessor") {
+        auto block = a.readBlock;
+        need(static_cast<bool>(block), "Pluggable accessor read block is missing");
+        auto result = (*block)(m);
+        (void)encodeValue(result, w.l);
+        return result;
+    }
     if (a.className == "MANullAccessor")
         throw Error("MAReadError: null accessor");
     if (a.className == "MAIdentityAccessor")
@@ -211,6 +227,13 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
 }
 void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::size_t depth) {
     w.tick(depth);
+    if (a.className == "MAPluggableAccessor") {
+        (void)encodeValue(v, w.l);
+        auto block = a.writeBlock;
+        need(static_cast<bool>(block), "Pluggable accessor write block is missing");
+        (*block)(m, v);
+        return;
+    }
     if (a.className == "MANullAccessor" || a.className == "MAIdentityAccessor")
         throw Error("MAWriteError: read-only accessor");
     if(a.className=="MADelegatorAccessor"){accessWrite(a.steps.front(),m,std::move(v),g,w,depth+1);return;}
@@ -242,6 +265,8 @@ struct CapabilityTarget {
 bool accessCan(const Accessor &a, CapabilityTarget target, const Graph *g, Work &w,
                std::size_t depth, bool writing) {
     w.tick(depth);
+    if (a.className == "MAPluggableAccessor")
+        return writing ? bool(a.writeBlock) : bool(a.readBlock);
     if (a.className == "MADictionaryAccessor" || a.className == "MAPropertyAccessor")
         return true;
     if (a.className == "MANullAccessor")
@@ -632,6 +657,14 @@ void Accessor::write(Model &m, Value v, Graph *g, Limits l) const {
     Work w{l};
     checkAccessor(*this, w, 0);
     accessWrite(*this, m, std::move(v), g, w, 0);
+}
+Accessor Accessor::pluggable(std::shared_ptr<const ReadBlock> read,
+                             std::shared_ptr<const WriteBlock> write) {
+    Accessor result;
+    result.className = "MAPluggableAccessor";
+    result.readBlock = std::move(read);
+    result.writeBlock = std::move(write);
+    return result;
 }
 bool Accessor::canRead(const Model &m, const Graph *g, Limits l) const {
     Work w{l};

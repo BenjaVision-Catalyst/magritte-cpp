@@ -91,9 +91,11 @@ void reference(const char *output) {
     std::vector<ClassInfo> definitions;
     for (const auto &row : f.at("additional"))
         definitions.push_back(info(row));
+    const auto added = std::count_if(definitions.begin(), definitions.end(),
+                                     [&](const auto &d) { return !registry.find(d.name); });
     registry.registerClasses(definitions);
     check(projected(J(registry.allClasses())) == f.at("classes"), "Discovered registered classes match GT projection");
-    check(previous.size() + definitions.size() == registry.allClasses().size(),
+    check(previous.size() + added == registry.allClasses().size(),
           "Registration extends the available environment");
     check(before.resolver().descriptions.at(old->id + ".classes")->options == previous,
           "Existing metadata retains its construction-time choices");

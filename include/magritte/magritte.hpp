@@ -134,9 +134,16 @@ public:
     bool operator==(const Options&) const;
 };
 struct Accessor {
+    using ReadBlock = std::function<Value(const struct Model &)>;
+    using WriteBlock = std::function<void(struct Model &, const Value &)>;
+    static Accessor pluggable(std::shared_ptr<const ReadBlock> = {},
+                              std::shared_ptr<const WriteBlock> = {});
     std::string className = "MADictionaryAccessor", name, writeName;
     Value uuid; // MANullAccessor comparison token, preserved without interpretation
     std::vector<Accessor> steps; // MAChainAccessor, performed from left to right
+    // Shared callable identity preserves Magritte block equality and shallow copying.
+    std::shared_ptr<const ReadBlock> readBlock;
+    std::shared_ptr<const WriteBlock> writeBlock;
     bool canRead(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     bool canWrite(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     Value read(const struct Model&, const Graph* = nullptr, Limits = {}) const;
@@ -338,6 +345,7 @@ public:
 // This returns a graph so its weak reference descriptions retain an owner.
 Graph descriptionModelFor(const Description&, Limits = {});
 // Magritte equality ignores IDs/properties; copies follow postCopy, not deep clone.
+bool accessorEqual(const Accessor &, const Accessor &, Limits = {});
 bool descriptionEqual(const Description&, const Description&, Limits = {});
 struct DescriptionCopy {
     std::shared_ptr<Description> root;

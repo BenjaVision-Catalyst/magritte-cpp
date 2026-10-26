@@ -103,6 +103,7 @@ ClassRegistry::ClassRegistry() : state_(std::make_unique<State>()) {
          {"MAObject", "MABasicObject", true, "Object"},
          {"MAOptionDescription", "MAReferenceDescription", true, "Option Description"},
          {"MAPasswordDescription", "MAStringDescription", false, "Password"},
+         {"MAPluggableAccessor", "MAAccessor", false, "Pluggable Accessor"},
          {"MAPluggableCondition", "MACondition", false, "Pluggable Condition"},
          {"MAPriorityContainer", "MAContainer", false, "Priority Container"},
          {"MAPropertyAccessor", "MADictionaryAccessor", false, "Property Accessor"},
