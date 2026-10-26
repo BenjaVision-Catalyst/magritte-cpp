@@ -67,7 +67,7 @@ void retain(DescriptionCopy &result, const std::shared_ptr<Description> &source,
         for (const auto &c : d->children)
             walk(c);
         if (d->isReference())
-            walk(detail::referenceTarget(*d));
+            if (auto ref = detail::storedReference(*d)) walk(ref);
     };
     std::size_t count = 0;
     visit(
@@ -121,8 +121,10 @@ DescriptionCopy copy(std::shared_ptr<Description> source, const std::string &id,
             if (d->isOption()) n->options = d->options.copy();
             if(d->accessorObject){n->accessorObject=AccessorObject::fromAccessor(nextId+".accessor",d->accessorObject->snapshot(l),l);n->accessor.reset();}
             result.retained.push_back(n);
-            if (d->isReference())
-                n->reference = clone(detail::referenceTarget(*d), nextId + ".reference", depth + 1);
+            if (d->isReference()) {
+                auto ref = detail::storedReference(*d);
+                detail::copyReferenceStorage(*n, *d, ref ? clone(ref, nextId + ".reference", depth + 1) : nullptr);
+            }
             active.erase(d.get());
             return n;
         };

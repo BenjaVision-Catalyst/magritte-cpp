@@ -103,7 +103,7 @@ void DescriptionBuilder::remember(std::shared_ptr<Description> source, bool refr
         identities_.emplace(d->id, d.get());
         for (const auto& child : d->children) pending.emplace_back(child, entry.second + 1);
         if (d->isReference())
-            pending.emplace_back(detail::referenceTarget(*d), entry.second + 1);
+            if (auto ref = detail::storedReference(*d)) pending.emplace_back(ref, entry.second + 1);
     }
 }
 std::shared_ptr<Description> DescriptionBuilder::ownedDescription(Description& d) const {

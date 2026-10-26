@@ -177,7 +177,7 @@ struct DynamicDescriptionCache::State {
             for (const auto &child : d->children)
                 pending.push_back({child, pair.second + 1});
             if (d->isReference())
-                pending.push_back({detail::referenceTarget(*d), pair.second + 1});
+                if (auto ref = detail::storedReference(*d)) pending.push_back({ref, pair.second + 1});
         }
     }
     DescriptionCopy result(std::shared_ptr<Description> root, std::shared_ptr<void> self) {

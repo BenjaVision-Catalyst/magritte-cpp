@@ -193,8 +193,9 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                 return true;
             if ((selector == "children" || selector == "setChildren:") && target->isContainer())
                 return true;
-            if ((selector == "reference" || selector == "reference:") && target->isReference())
-                return true;
+            if ((selector == "reference" || selector == "reference:") && target->isReference()) return true;
+            if (selector == "reference" && detail::descriptionIs(*target, "MABooleanDescription")) return true;
+            if ((selector == "allClasses" || selector == "commonClass") && target->isRelation()) return true;
             if ((selector == "optionsTextual" || selector == "optionsTextual:") &&
                 target->isOption())
                 return true;
@@ -232,8 +233,18 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                     values.push_back(ref(d));
                 return Value(Value::Collection{"ordered", values});
             }
-            if (name == "reference" && target->isReference())
+            if (name == "reference" && (target->isReference() || detail::descriptionIs(*target, "MABooleanDescription")))
                 return ref(target->referenceDescription());
+            if (name == "allClasses" && target->isRelation()) {
+                Value::Array values;
+                for (const auto &name : target->allClasses(s->limits)) values.emplace_back(Value::Class{name});
+                return Value(values);
+            }
+            if (name == "commonClass" && target->isRelation()) {
+                auto common = target->commonClass(s->limits);
+                if (auto cls = std::get_if<Value::Class>(&common)) return Value(*cls);
+                return ref(std::get<std::shared_ptr<Description>>(common));
+            }
             if (name == "name")
                 return target->property("name", s->limits);
             if (name == "optionsTextual" && target->isOption()) {
@@ -296,7 +307,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                 return;
             }
             if (name == "reference:" && target->isReference()) {
-                target->reference = description(v);
+                target->setReference(v.isNil() ? nullptr : description(v));
                 return;
             }
             if (name == "name:") {
@@ -648,7 +659,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             for (const auto &c : d->children)
                 walk(c);
             if (d->isReference())
-                walk(detail::referenceTarget(*d));
+            if (auto ref = detail::storedReference(*d)) walk(ref);
         };
         walk(target);
         std::size_t added = 0;
@@ -731,7 +742,7 @@ Graph RecursiveDescriptionModel::schemas() const {
         for (const auto &c : d->orderedChildren())
             include(c, depth + 1);
         if (d->isReference())
-            include(detail::referenceTarget(*d), depth + 1);
+            if (auto ref = detail::storedReference(*d)) include(ref, depth + 1);
     };
     for (const auto &id : state_->metaIds)
         include(state_->graph.descriptions.at(id), 0);

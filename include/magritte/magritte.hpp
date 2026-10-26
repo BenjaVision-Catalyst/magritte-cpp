@@ -248,9 +248,15 @@ struct Condition {
     std::function<bool(const Value&)> test;
 };
 class Visitor;
-struct Description : Model {
+namespace detail {
+void copyReferenceStorage(Description &, const Description &, std::shared_ptr<Description>);
+}
+using RelationCommonClass = std::variant<Value::Class, std::shared_ptr<Description>>;
+struct Description : Model, std::enable_shared_from_this<Description> {
   private:
     mutable std::optional<Accessor> defaultNullAccessor_;
+    mutable std::shared_ptr<Description> defaultReference_;
+    friend void detail::copyReferenceStorage(Description &, const Description &, std::shared_ptr<Description>);
 
   public:
     virtual void acceptMagritte(Visitor&);
@@ -271,7 +277,7 @@ struct Description : Model {
     std::map<std::string, Value> properties;
     std::vector<std::shared_ptr<Description>> children;
     // Graph owns descriptions. Non-owning reference edges permit recursive models.
-    std::weak_ptr<Description> reference;
+    mutable std::weak_ptr<Description> reference;
     std::vector<std::string> classes;
     Options options;
     std::vector<std::pair<Value, std::string>> labels;
@@ -292,6 +298,10 @@ struct Description : Model {
     bool isReference() const;
     bool isMultiple() const;
     std::shared_ptr<Description> referenceDescription() const;
+    Description &setReference(std::shared_ptr<Description>);
+    std::vector<std::string> allClasses(Limits = {}) const;
+    RelationCommonClass commonClass(Limits = {}) const;
+    virtual std::shared_ptr<Description> descriptionContainer() const;
     Description &setUndefined(Value, Limits = {});
     Options allOptions(Limits = {}, const Graph * = nullptr) const;
     Options allOptionsWith(const Value &, Limits = {}, const Graph * = nullptr) const;

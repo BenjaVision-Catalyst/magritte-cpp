@@ -177,8 +177,10 @@ int main(int argc, char **argv) {
         owner->reference = reference;
         fails([&] { owner->setUndefined(Value(true)); });
         owner->reference.reset();
-        fails([&] { owner->referenceDescription(); });
-        fails([&] { owner->setUndefined(Value("saved")); });
+        auto generated = owner->referenceDescription();
+        check(generated->className == "MAStringDescription");
+        owner->setUndefined(Value("saved"));
+        check(generated->property("undefined") == Value("saved"));
         check(owner->property("undefined") == Value("saved"));
         std::cout << checks << " reference checks passed\n";
     } catch (const std::exception &e) {

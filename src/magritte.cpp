@@ -296,7 +296,7 @@ void supported(const Description &d) {
             "Portable container conditions require a model message protocol");
     require(d.isContainer() || d.children.empty(), "Scalar cannot contain children");
     if (d.isReference())
-        (void)detail::referenceTarget(d);
+        (void)detail::storedReference(d);
     else
         require(d.reference.expired(), "Reference slot requires a reference description");
     require(d.isRelation() || d.classes.empty(), "Classes require a relation");
@@ -568,7 +568,7 @@ void visit(const Description& root, const std::function<void(const Description&)
         composition(d, 0); f(d);
         for (const auto& c : d.orderedChildren()) walk(*c, depth + 1);
         if (d.isReference())
-            walk(*detail::referenceTarget(d), depth + 1);
+            if (auto ref = detail::storedReference(d)) walk(*ref, depth + 1);
     };
     walk(root, 0);
 }
@@ -697,8 +697,12 @@ Graph Graph::decode(const std::string& input, Limits l) {
         for (const auto& n : j.at("descriptions")) {
             auto d = g.descriptions.at(string(n.at("id")));
             if (d->isReference()) {
-                auto ref = identity(n.at("reference")); require(g.descriptions.count(ref), "Dangling reference description");
-                d->reference = g.descriptions.at(ref);
+                if (n.at("reference").is_null()) {
+                    require(g.format == "magritte.graph/4", "Nil references require graph/4");
+                } else {
+                    auto ref = identity(n.at("reference")); require(g.descriptions.count(ref), "Dangling reference description");
+                    d->setReference(g.descriptions.at(ref));
+                }
             }
             if (d->isRelation()) {
                 require(n.at("classes").is_array(), "Expected classes array");
@@ -813,9 +817,14 @@ std::string Graph::encode(Limits l) const {
                 }
             } else n["accessor"] = accessorWire(d.effectiveAccessor(),l);
             if (d.isReference()) {
-                auto r = detail::referenceTarget(d);
-                require(descriptions.count(r->id) && descriptions.at(r->id) == r, "Unregistered reference description");
-                n["reference"] = r->id;
+                auto r = detail::storedReference(d);
+                if (r) {
+                    require(descriptions.count(r->id) && descriptions.at(r->id) == r, "Unregistered reference description");
+                    n["reference"] = r->id;
+                } else {
+                    require(format == "magritte.graph/4", "Nil references require graph/4");
+                    n["reference"] = nullptr;
+                }
             }
             if (d.isRelation()) n["classes"] = d.classes;
             if (d.isOption()) {
