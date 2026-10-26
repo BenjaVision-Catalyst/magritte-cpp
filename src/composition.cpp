@@ -118,6 +118,7 @@ DescriptionCopy copy(std::shared_ptr<Description> source, const std::string &id,
                 throw Error("Recursive reference postCopy is unsupported; copy is not a graph deep clone");
             auto n = std::make_shared<Description>(*d);
             n->id = nextId;
+            if (n->isContainer()) n->setChildren(d->children, l);
             if (d->isOption()) n->options = d->options.copy();
             if(d->accessorObject){n->accessorObject=AccessorObject::fromAccessor(nextId+".accessor",d->accessorObject->snapshot(l),l);n->accessor.reset();}
             result.retained.push_back(n);
@@ -185,7 +186,7 @@ DescriptionCopy concatenate(std::shared_ptr<Description> a, std::shared_ptr<Desc
     auto r = copy(wrap.root, id, l);
     retain(r, b, l);
     auto more = b->isContainer() ? b->orderedChildren() : std::vector<std::shared_ptr<Description>>{b};
-    r.root->children.insert(r.root->children.end(), more.begin(), more.end());
+    r.root->addAll(more, l);
     if (r.root->children.size() > l.items)
         throw Error("Composition item limit");
     return r;
@@ -204,7 +205,7 @@ DescriptionCopy unionDescriptions(std::shared_ptr<Description> a, std::shared_pt
                 break;
             }
         if (!contains)
-            r.root->children.push_back(d);
+            r.root->add(d, l);
     }
     if (r.root->children.size() > l.items)
         throw Error("Composition item limit");
@@ -215,7 +216,7 @@ DescriptionCopy intersectDescriptions(std::shared_ptr<Description> a, std::share
     auto left = fields(a), right = fields(b);
     auto r = copy(a, id, l);
     retain(r, b, l);
-    r.root->children.clear();
+    r.root->removeAll(l);
     Work w{l};
     for (const auto &d : left) {
         bool contains = false;
@@ -232,7 +233,7 @@ DescriptionCopy intersectDescriptions(std::shared_ptr<Description> a, std::share
                     break;
                 }
             if (!duplicate)
-                r.root->children.push_back(d);
+                r.root->add(d, l);
         }
     }
     return r;
@@ -242,10 +243,10 @@ DescriptionCopy selectDescriptions(std::shared_ptr<Description> d,
                                    Limits l) {
     auto items = fields(d);
     auto r = copy(d, id, l);
-    r.root->children.clear();
-    for (const auto &item : items)
-        if (f(*item))
-            r.root->children.push_back(item);
+    r.root->removeAll(l);
+    std::vector<std::shared_ptr<Description>> selected;
+    for (const auto &item : items) if (f(*item)) selected.push_back(item);
+    r.root->setChildren(std::move(selected), l);
     return r;
 }
 DescriptionCopy copyWithout(std::shared_ptr<Description> d, const Description &excluded,
@@ -278,18 +279,20 @@ collectDescriptions(std::shared_ptr<Description> d,
                     const std::string &id, Limits l) {
     auto items = fields(d);
     auto r = copy(d, id, l);
-    r.root->children.clear();
+    r.root->removeAll(l);
+    std::vector<std::shared_ptr<Description>> collected;
     for (const auto &item : items) {
         auto next = f(item);
         retain(r, next, l);
-        r.root->children.push_back(next);
+        collected.push_back(next);
     }
+    r.root->setChildren(std::move(collected), l);
     return r;
 }
 DescriptionCopy copyEmpty(std::shared_ptr<Description> d, const std::string &id, Limits l) {
     auto r = copy(d, id, l);
     fields(d);
-    r.root->children.clear();
+    r.root->removeAll(l);
     return r;
 }
 DescriptionCopy copyRange(std::shared_ptr<Description> d, std::size_t begin, std::size_t end,
@@ -298,7 +301,18 @@ DescriptionCopy copyRange(std::shared_ptr<Description> d, std::size_t begin, std
     if (begin > end || end > items.size())
         throw Error("Composition range outside children");
     auto r = copy(d, id, l);
-    r.root->children.assign(items.begin() + begin, items.begin() + end);
+    r.root->setChildren({items.begin() + begin, items.begin() + end}, l);
     return r;
 }
 } // namespace magritte
+
+namespace magritte::detail {
+std::optional<std::size_t> firstEqualChild(const std::vector<std::shared_ptr<Description>> &children, const Description &sought, Limits limits) {
+    Work work{limits};
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        if (!children[i]) throw Error("Null container child");
+        if (work.equal(sought, *children[i])) return i;
+    }
+    return {};
+}
+} // namespace magritte::detail

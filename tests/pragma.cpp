@@ -319,7 +319,7 @@ int main(int argc, char **argv) {
             check(text(*builder
                             .forTarget(DescriptionTarget(*p, "MAPragmaProbePlain", &second),
                                        "ignored")
-                            .root->children[0]) == "PlainAZ");
+                            .root->orderedChildren()[1]) == "PlainAZ");
         }
         check(text(*builder.forTarget(t, "changed").root->orderedChildren()[1]) == "ChangedAZ");
         registry.install(original);

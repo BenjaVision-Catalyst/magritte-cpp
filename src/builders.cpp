@@ -282,7 +282,7 @@ void DescriptionFlattener::addToBuiltDescription(Description &d, const Value &va
             throw Error("Built description cannot add field");
         if (result_.root->children.size() >= limits_.items)
             throw Error("Flattener item limit");
-        result_.root->children.push_back(ownedDescription(d));
+        result_.root->add(ownedDescription(d), limits_);
     }
 }
 } // namespace magritte

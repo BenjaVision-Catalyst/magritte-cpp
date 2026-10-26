@@ -125,9 +125,11 @@ int main(int argc, char** argv) {
         auto originalOrder = ada.description->orderedChildren();
         for (std::size_t i=0; i<originalOrder.size(); ++i) check(originalOrder[i]->id == reference.at("containerOrder").at(i), "Insertion order");
         ada.description->className = "MAPriorityContainer";
+        ada.description->setChildren(originalOrder);
         auto ordered = ada.description->orderedChildren();
         for (std::size_t i=0; i<ordered.size(); ++i) check(ordered[i]->id == reference.at("priorityOrder").at(i), "Priority order");
         ada.description->className = "MAContainer";
+        ada.description->setChildren(originalOrder);
         name->properties["readOnly"] = Value(true);
         check(validateValue(*name, {}).empty(), "Read-only skips validation");
         ada.writeUsing(*name, Value("Raw write"));

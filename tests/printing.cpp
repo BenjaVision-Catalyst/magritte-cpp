@@ -234,6 +234,7 @@ int main(int argc, char **argv) {
         a->properties["priority"] = Value(std::int64_t(3));
         b->properties["priority"] = Value(std::int64_t(1));
         c->properties["priority"] = Value(std::int64_t(2));
+        root->resort();
         PrintStream sorted;
         root->print(model, sorted);
         check(sorted.contents() == "B C A");

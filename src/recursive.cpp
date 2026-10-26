@@ -297,7 +297,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                 for (const auto &e : v.elements())
                     next.push_back(description(e));
                 auto previous = target->children;
-                target->children = std::move(next);
+                target->setChildren(std::move(next), s->limits);
                 try {
                     visit(*target, [](const auto &) {}, s->limits);
                 } catch (...) {

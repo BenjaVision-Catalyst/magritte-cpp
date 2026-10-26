@@ -399,10 +399,6 @@ std::int64_t Description::priority() const {
 std::vector<std::shared_ptr<Description>> Description::orderedChildren() const {
     auto result = children;
     for (const auto& child : result) require(bool(child), "Null description");
-    if (detail::descriptionIs(*this, "MAPriorityContainer"))
-        std::stable_sort(result.begin(), result.end(), [](const auto &a, const auto &b) {
-            return detail::compareNumbers(a->priorityValue(), b->priorityValue()) < 0;
-        });
     return result;
 }
 Value Description::readUsing(const Description &d) const {
@@ -616,6 +612,10 @@ Graph Graph::decode(const std::string& input, Limits l) {
             require(g.format == "magritte.graph/4" || implementation == d->className,
                     "Registered description subclasses require graph/4");
             auto shape = n; if (g.format >= "magritte.graph/3") shape.erase("conditions");
+            if (n.contains("childrenOrder")) {
+                require(g.format == "magritte.graph/4" && detail::descriptionIs(*d, "MAPriorityContainer") && n.at("childrenOrder") == "stored", "Stored children order requires a graph/4 priority container");
+                shape.erase("childrenOrder");
+            }
             if (n.contains("definingContext")) {
                 require(g.format == "magritte.graph/4", "Defining context requires graph/4");
                 shape.erase("definingContext");
@@ -677,7 +677,7 @@ Graph Graph::decode(const std::string& input, Limits l) {
         for (const auto& n : j.at("descriptions")) {
             auto id = string(n.at("id"));
             if (!g.descriptions.at(id)->isContainer()) continue;
-            require(n.at("children").is_array(), "Expected children array");
+            require(n.at("children").is_array() && n.at("children").size() <= l.items, "Expected bounded children array");
             for (const auto& c : n.at("children")) {
                 auto child = identity(c); require(g.descriptions.count(child), "Dangling description identity");
                 composition[id].push_back(child);
@@ -727,16 +727,17 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 for (const auto& p : d->properties) require(oldProperties.count(p.first) || p.first.rfind("metadata:", 0) == 0, "Property requires graph/2");
             }
             if (!d->isContainer()) continue;
-            require(n.at("children").is_array(), "Expected children array");
+            require(n.at("children").is_array() && n.at("children").size() <= l.items, "Expected bounded children array");
             std::set<std::string> unique;
             for (const auto& c : n.at("children")) {
                 auto id = identity(c);
-                require(unique.insert(id).second, "Duplicate container child");
+                require(unique.insert(id).second || g.format == "magritte.graph/4", "Duplicate container child requires graph/4");
                 require(g.descriptions.count(id), "Dangling description identity");
                 auto child = g.descriptions.at(id);
                 require(g.format != "magritte.graph/1" || !child->isContainer(), "Nested containers require graph/2");
                 d->children.push_back(child);
             }
+            if (!n.contains("childrenOrder")) d->setChildren(d->children, l);
         }
         require(g.descriptions.count(g.root) && g.descriptions.at(g.root)->isContainer(), "Root must identify a container");
         std::set<const Description*> checked;
@@ -810,6 +811,11 @@ std::string Graph::encode(Limits l) const {
             } else require(d.portableConditions.empty(),"Conditions require graph/3");
             if (d.isContainer()) {
                 require(!d.accessor,"Container accessors are implicit identity");
+                if (detail::descriptionIs(d, "MAPriorityContainer")) {
+                    if (format == "magritte.graph/4") n["childrenOrder"] = "stored";
+                    else for (std::size_t i = 1; i < d.children.size(); ++i)
+                        require(detail::compareNumbers(d.children[i-1]->priorityValue(), d.children[i]->priorityValue()) <= 0, "Stale priority order requires graph/4");
+                }
                 n["children"] = J::array();
                 for (const auto& c : d.children) {
                     require(c && descriptions.count(c->id) && descriptions.at(c->id) == c, "Unregistered child identity");

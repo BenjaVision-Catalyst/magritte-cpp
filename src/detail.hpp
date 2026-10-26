@@ -6,6 +6,7 @@ std::shared_ptr<Description> referenceTarget(const Description &);
 Value undefinedIfNil(const Description &, Value);
 bool knownClass(const std::string&);
 bool shouldWrite(const Description&, const Value&, const Value&, Limits, std::size_t&);
+std::optional<std::size_t> firstEqualChild(const std::vector<std::shared_ptr<Description>> &, const Description &, Limits);
 bool descriptionIs(const Description &, const std::string &ancestor);
 std::string descriptionImplementation(const Description &);
 std::string descriptionType(const Description&);

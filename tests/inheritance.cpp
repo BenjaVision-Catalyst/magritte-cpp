@@ -195,7 +195,7 @@ int main(int argc, char **argv) {
     a->className = b->className = "InheritedStringDescription";
     a->properties["priority"] = Value(std::int64_t(2));
     b->properties["priority"] = Value(std::int64_t(1));
-    priority->children = {a, b};
+    priority->setChildren({a, b});
     check(priority->orderedChildren()[0] == b, "Inherited priority ordering");
     DictionaryModel model;
     model.values = {{"a", Value("A")}, {"b", Value("B")}};

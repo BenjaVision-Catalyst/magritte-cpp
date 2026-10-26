@@ -39,7 +39,7 @@ int main() {
             d.id = "root";
             d.className = expected.at("class");
             if (!expected.at("empty").get<bool>())
-                d.children = {field("a", 30), field("b", 10), field("c", 20)};
+                d.setChildren({field("a", 30), field("b", 10), field("c", 20)});
             auto fallback = field("fallback");
             J row = {{"class", d.className}, {"empty", d.children.empty()}};
             J trace = J::array();

@@ -343,6 +343,15 @@ struct Description : Model, std::enable_shared_from_this<Description> {
     bool flag(const std::string&) const;
     std::int64_t priority() const;
     Value priorityValue() const;
+    // Raw children is stored order; use source-shaped operations for construction/mutation.
+    Description &setChildren(std::vector<std::shared_ptr<Description>>, Limits = {});
+    Description &add(std::shared_ptr<Description>, Limits = {});
+    Description &addAll(std::vector<std::shared_ptr<Description>>, Limits = {});
+    Description &remove(const Description &, Limits = {});
+    Description &removeAll(Limits = {});
+    Description &moveUp(const Description &, Limits = {});
+    Description &moveDown(const Description &, Limits = {});
+    Description &resort(Limits = {});
     std::vector<std::shared_ptr<Description>> orderedChildren() const;
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;

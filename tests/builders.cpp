@@ -396,6 +396,7 @@ int main(int argc, char **argv) {
         priorityContainer->className = "MAPriorityContainer";
         priorityContainer->children[0]->properties["priority"] = Value(Value::Fraction{10001, 100});
         priorityContainer->children[1]->properties["priority"] = Value(std::int64_t(100));
+        priorityContainer->resort();
         check(priorityContainer->orderedChildren()[0]->id == "small");
         check(attempt([] { return Value(Value::Fraction{1, 0}); }).contains("error"));
         check(attempt([] { return Value(Value::Fraction{1, -1}); }).contains("error"));

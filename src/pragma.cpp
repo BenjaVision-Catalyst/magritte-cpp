@@ -315,7 +315,7 @@ DescriptionCopy PragmaBuilder::forTarget(DescriptionTarget target, const std::st
         throw Error("Container does not understand addAll:");
     if (root->children.size() + fields.size() > state.limits.items)
         throw Error("Discovered container item limit");
-    root->children.insert(root->children.end(), fields.begin(), fields.end());
+    root->addAll(fields, state.limits);
     state.retain({root, {}, {}}, cache.get());
     return state.result(root, cache);
 }

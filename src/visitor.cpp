@@ -137,7 +137,7 @@ DescriptionCopy DescriptionBuilder::buildFrom(std::shared_ptr<Description> sourc
 }
 void DescriptionBuilder::visitContainer(Description& d) {
     DescriptionBuilder::setBuiltDescription(copyForBuild(ownedDescription(d)));
-    result_.root->children.clear();
+    result_.root->removeAll(limits_);
     auto children = d.orderedChildren();
     if (children.size() > limits_.items) throw Error("Builder item limit");
     for (const auto& child : children) visit(*copyForBuild(child));
@@ -148,7 +148,7 @@ void DescriptionBuilder::visitDescription(Description& d) {
     else {
         if (!result_.root->isContainer()) throw Error("Built scalar description cannot add another description");
         if (result_.root->children.size() >= limits_.items) throw Error("Builder item limit");
-        result_.root->children.push_back(std::move(input));
+        result_.root->add(std::move(input), limits_);
     }
 }
 } // namespace magritte
