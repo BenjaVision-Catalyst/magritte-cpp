@@ -184,6 +184,22 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
                 throw Error("Metadata reference must identify a description");
             return b->target;
         }
+        bool respondsToSelector(const std::string &selector) const override {
+            (void)state();
+            if (selector == "accessor" || selector == "accessor:" || selector == "name" ||
+                selector == "name:")
+                return true;
+            if ((selector == "classes" || selector == "classes:") && target->isRelation())
+                return true;
+            if ((selector == "children" || selector == "setChildren:") && target->isContainer())
+                return true;
+            if ((selector == "reference" || selector == "reference:") && target->isReference())
+                return true;
+            if ((selector == "optionsTextual" || selector == "optionsTextual:") &&
+                target->isOption())
+                return true;
+            return target->respondsToSelector(selector);
+        }
         Value readSlot(const std::string &strategy, const std::string &name) const override {
             auto s = state();
             if (strategy != "MASelectorAccessor")
@@ -349,11 +365,26 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         bool kindOf(const std::string &cls) const override {
             return ClassRegistry::global().includesBehavior(target->value.className, cls);
         }
+        bool respondsToSelector(const std::string &selector) const override {
+            (void)state();
+            const auto &cls = target->value.className;
+            if ((selector == "key" || selector == "key:") &&
+                (cls == "MADictionaryAccessor" || cls == "MAPropertyAccessor"))
+                return true;
+            if ((selector == "selector" || selector == "selector:") && cls == "MASelectorAccessor")
+                return true;
+            if ((selector == "next" || selector == "next:") &&
+                (cls == "MAChainAccessor" || cls == "MADelegatorAccessor"))
+                return true;
+            return (selector == "accessor" || selector == "accessor:") && cls == "MAChainAccessor";
+        }
         Value readSlot(const std::string &strategy, const std::string &name) const override {
             auto s = state();
             if (strategy != "MASelectorAccessor")
                 throw Error("Accessor metadata requires selector access");
             auto cls = target->value.className;
+            if (name == "selector" && cls == "MASelectorAccessor" && target->value.name.empty())
+                return {};
             if ((name == "key" && (cls == "MADictionaryAccessor" || cls == "MAPropertyAccessor")) ||
                 (name == "selector" && cls == "MASelectorAccessor"))
                 return Value(Value::Symbol{target->value.name});

@@ -1,6 +1,6 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.10 adds live Magritte dynamic option providers; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.11 adds Magritte accessor capability discovery; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
@@ -66,3 +66,5 @@ The 0.8 class environment supports application class registration, RTTI/metatype
 The 0.9 phase adds `acceptMagritte`, native visitor overrides with inherited fallback, and the stateful `MADescriptionBuilder` copy/enrichment protocol. See [visitors.md](docs/visitors.md) for APIs, the upstream/GT audit, ownership and remaining semantics.
 
 The 0.10 phase implements `MADynamicOptions` completion, membership, reader and shallow-copy semantics. `Options` preserves collection/provider results; known static callers use `.values()` explicitly. See [dynamic-options.md](docs/dynamic-options.md) for APIs, the source migration, GT evidence and export boundaries.
+
+The 0.11 phase adds `Accessor.canRead`/`canWrite`, explicit host selector/variable discovery, and independent absent read/write selectors. See [accessor-capabilities.md](docs/accessor-capabilities.md) for the exact upstream rules, GT traces, APIs and remaining reflection boundaries.

@@ -175,7 +175,9 @@ Accessor accessorValue(const J &j, Limits l, std::size_t depth = 0) {
             a.steps.push_back(accessorValue(step, l, depth + 1));
     } else if (a.className == "MASelectorAccessor") {
         keys(j, {"class", "readSelector", "writeSelector"});
-        a.name = identity(j.at("readSelector"));
+        a.name = string(j.at("readSelector"));
+        if (!a.name.empty())
+            (void)identity(j.at("readSelector"));
         a.writeName = string(j.at("writeSelector"));
         if (!a.writeName.empty())
             (void)identity(j.at("writeSelector"));

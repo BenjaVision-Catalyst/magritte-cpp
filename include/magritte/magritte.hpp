@@ -137,6 +137,8 @@ struct Accessor {
     std::string className = "MADictionaryAccessor", name, writeName;
     Value uuid; // MANullAccessor comparison token, preserved without interpretation
     std::vector<Accessor> steps; // MAChainAccessor, performed from left to right
+    bool canRead(const struct Model &, const Graph * = nullptr, Limits = {}) const;
+    bool canWrite(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     Value read(const struct Model&, const Graph* = nullptr, Limits = {}) const;
     void write(struct Model&, Value, Graph* = nullptr, Limits = {}) const;
     void check(Limits = {}) const;
@@ -145,6 +147,9 @@ struct Model {
     virtual ~Model() = default;
     virtual bool usesStoredContainerValues() const { return false; }
     virtual bool kindOf(const std::string& name) const { return ClassRegistry::global().includesBehavior("Object", name); }
+    // Explicit host protocol discovery; queries do not execute bound methods.
+    virtual bool respondsToSelector(const std::string &) const { return false; }
+    virtual bool hasVariable(const std::string &) const { return false; }
     virtual Value readSlot(const std::string& strategy, const std::string& name) const;
     virtual void writeSlot(const std::string& strategy, const std::string& name, Value);
     virtual Value readUsing(const Description&) const = 0;
@@ -207,6 +212,7 @@ struct Description : Model {
     std::vector<std::shared_ptr<Description>> orderedChildren() const;
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;
+    bool respondsToSelector(const std::string &) const override;
     Value readSlot(const std::string&, const std::string&) const override;
     void writeSlot(const std::string&, const std::string&, Value) override;
 };
@@ -236,6 +242,8 @@ public:
     // Explicit host bindings, indexed by selector or variable name. No implicit reflection.
     std::map<std::string, std::function<Value(const void*)>> readers;
     std::map<std::string, std::function<void(void*, const Value&)>> writers;
+    bool respondsToSelector(const std::string &) const override;
+    bool hasVariable(const std::string &) const override;
     Value readSlot(const std::string&, const std::string&) const override;
     void writeSlot(const std::string&, const std::string&, Value) override;
     // Caller retains ownership and must outlive this adapter and every access.

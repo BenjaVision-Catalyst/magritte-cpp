@@ -169,7 +169,7 @@ void checkAccessor(const Accessor &a, Work &w, std::size_t depth) {
     need(a.className == "MADictionaryAccessor" || a.className == "MAPropertyAccessor" ||
              a.className == "MASelectorAccessor" || a.className == "MAVariableAccessor",
          "Unsupported accessor");
-    need(!a.name.empty(), "Missing accessor name");
+    need(a.className == "MASelectorAccessor" || !a.name.empty(), "Missing accessor name");
     w.tick(depth, a.name.size() + a.writeName.size());
     need(a.className == "MASelectorAccessor" || a.writeName.empty(), "Unexpected write selector");
 }
@@ -194,8 +194,10 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
     if (a.className == "MAIdentityAccessor")
         return identity(m, g, w);
     if(a.className=="MADelegatorAccessor")return accessRead(a.steps.front(),m,g,w,depth+1);
-    if (a.className != "MAChainAccessor")
+    if (a.className != "MAChainAccessor") {
+        need(a.className != "MASelectorAccessor" || !a.name.empty(), "Absent read selector");
         return m.readSlot(a.className, a.name);
+    }
     const Model *target = &m;
     Value result;
     for (std::size_t i = 0; i < a.steps.size(); ++i) {
@@ -213,6 +215,7 @@ void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::s
         throw Error("MAWriteError: read-only accessor");
     if(a.className=="MADelegatorAccessor"){accessWrite(a.steps.front(),m,std::move(v),g,w,depth+1);return;}
     if (a.className != "MAChainAccessor") {
+        need(a.className != "MASelectorAccessor" || !a.writeName.empty(), "Absent write selector");
         m.writeSlot(a.className, a.className == "MASelectorAccessor" ? a.writeName : a.name, std::move(v));
         return;
     }
@@ -223,6 +226,44 @@ void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::s
         target = &g->resolve(next);
     }
     accessWrite(a.steps.back(), *target, std::move(v), g, w, depth + 1);
+}
+// Resolve an intermediate result only when the next capability needs a model.
+// Dictionary/property/identity/null capabilities are independent of their receiver.
+struct CapabilityTarget {
+    const Model *model;
+    const Value *value = nullptr;
+    const Model &resolve(const Graph *g) const {
+        if (model)
+            return *model;
+        need(g, "Chain capability traversal requires graph resolver");
+        return g->resolve(*value);
+    }
+};
+bool accessCan(const Accessor &a, CapabilityTarget target, const Graph *g, Work &w,
+               std::size_t depth, bool writing) {
+    w.tick(depth);
+    if (a.className == "MADictionaryAccessor" || a.className == "MAPropertyAccessor")
+        return true;
+    if (a.className == "MANullAccessor")
+        return false;
+    if (a.className == "MAIdentityAccessor")
+        return !writing;
+    if (a.className == "MASelectorAccessor") {
+        const auto &selector = writing ? a.writeName : a.name;
+        return !selector.empty() && target.resolve(g).respondsToSelector(selector);
+    }
+    if (a.className == "MAVariableAccessor")
+        return target.resolve(g).hasVariable(a.name);
+    if (a.className == "MADelegatorAccessor")
+        return accessCan(a.steps.front(), target, g, w, depth + 1, writing);
+    Value next;
+    for (std::size_t i = 0; i + 1 < a.steps.size(); ++i) {
+        if (!accessCan(a.steps[i], target, g, w, depth + 1, false))
+            return false;
+        next = accessRead(a.steps[i], target.resolve(g), g, w, depth + 1);
+        target = {nullptr, &next};
+    }
+    return accessCan(a.steps.back(), target, g, w, depth + 1, writing);
 }
 std::string propText(const Description &d, const std::string &name) {
     auto v = d.property(name);
@@ -591,6 +632,33 @@ void Accessor::write(Model &m, Value v, Graph *g, Limits l) const {
     Work w{l};
     checkAccessor(*this, w, 0);
     accessWrite(*this, m, std::move(v), g, w, 0);
+}
+bool Accessor::canRead(const Model &m, const Graph *g, Limits l) const {
+    Work w{l};
+    checkAccessor(*this, w, 0);
+    return accessCan(*this, {&m}, g, w, 0, false);
+}
+bool Accessor::canWrite(const Model &m, const Graph *g, Limits l) const {
+    Work w{l};
+    checkAccessor(*this, w, 0);
+    return accessCan(*this, {&m}, g, w, 0, true);
+}
+bool Description::respondsToSelector(const std::string &selector) const {
+    const bool writing = !selector.empty() && selector.back() == ':';
+    return detail::metadataSelector(
+        *this, writing ? selector.substr(0, selector.size() - 1) : selector, writing);
+}
+bool NativeModel::respondsToSelector(const std::string &selector) const {
+    const auto key = "MASelectorAccessor:" + selector;
+    const auto r = readers.find(key);
+    const auto w = writers.find(key);
+    return object_ && ((r != readers.end() && r->second) || (w != writers.end() && w->second));
+}
+bool NativeModel::hasVariable(const std::string &name) const {
+    const auto key = "MAVariableAccessor:" + name;
+    const auto r = readers.find(key);
+    const auto w = writers.find(key);
+    return object_ && ((r != readers.end() && r->second) || (w != writers.end() && w->second));
 }
 Value Model::readSlot(const std::string &, const std::string &) const {
     throw Error("Unbound accessor read");
