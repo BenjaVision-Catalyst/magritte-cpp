@@ -3,20 +3,6 @@
 #include <set>
 namespace magritte {
 namespace {
-const std::vector<std::string> concrete{"MAContainer",
-                                        "MAPriorityContainer",
-                                        "MAStringDescription",
-                                        "MASymbolDescription",
-                                        "MAMemoDescription",
-                                        "MAPasswordDescription",
-                                        "MATokenDescription",
-                                        "MANumberDescription",
-                                        "MABooleanDescription",
-                                        "MAToOneRelationDescription",
-                                        "MAToManyRelationDescription",
-                                        "MAToManyScalarRelationDescription",
-                                        "MASingleOptionDescription",
-                                        "MAMultipleOptionDescription"};
 Graph expanded(const Description &target, Limits limits) {
     auto graph = descriptionModelFor(target, limits);
     auto root = graph.descriptions.at(graph.root);
@@ -49,18 +35,16 @@ Graph expanded(const Description &target, Limits limits) {
         d->properties["label"] = Value("Elements");
         d->properties["ordered"] = Value(true);
         d->properties["default"] = Value(Value::Collection{"ordered", {}});
-        for (const auto &cls : concrete)
-            if (cls != "MAContainer" && cls != "MAPriorityContainer")
-                d->classes.push_back(cls);
+        d->classes = ClassRegistry::global().withAllConcreteClasses("MAElementDescription");
     }
     if (target.isReference()) {
         auto d = add("reference", "MAToOneRelationDescription", 400);
         d->properties["label"] = Value("Description");
         if (target.isRelation()) {
-            d->classes = {"MAContainer", "MAPriorityContainer"};
+            d->classes = ClassRegistry::global().withAllConcreteClasses("MAContainer");
             d->properties["required"] = Value(false);
         } else {
-            d->classes = concrete;
+            d->classes = ClassRegistry::global().withAllConcreteClasses("MADescription");
             d->properties["required"] = Value(true);
         }
     }
@@ -73,9 +57,7 @@ Graph expanded(const Description &target, Limits limits) {
     return graph;
 }
 
-const std::vector<std::string> accessorClasses{
-    "MADictionaryAccessor", "MAPropertyAccessor", "MASelectorAccessor",  "MAVariableAccessor",
-    "MANullAccessor",       "MAIdentityAccessor", "MADelegatorAccessor", "MAChainAccessor"};
+std::vector<std::string> accessorClasses() { return ClassRegistry::global().allSubclasses("MAAccessor"); }
 std::shared_ptr<Description> addMetadata(Graph &g, const std::string &key, const std::string &cls,
                                          std::optional<std::int64_t> priority = {}) {
     auto d = std::make_shared<Description>();
@@ -112,18 +94,21 @@ Graph objectMetadata(const std::string &cls) {
     g.descriptions.emplace(root->id, root);
     return g;
 }
-Graph reflected(const Description &target, Limits limits, bool completeRegistry = false) {
+Graph reflected(const Description &target, Limits limits) {
     auto g = expanded(target, limits);
     g.format = "magritte.graph/4";
-    for (auto &p : g.descriptions)
-        if (p.second->isRelation() && p.first != g.root &&
-            p.first.find(".reference.reference") == std::string::npos) {
-            auto &names = p.second->classes;
-            if (!names.empty() && std::find(names.begin(), names.end(), "MAStringDescription") != names.end())
-                names.push_back("MAClassDescription");
-        }
+    auto &registry = ClassRegistry::global();
+    for (const auto &key : {"children", "reference"}) {
+        auto i = g.descriptions.find(g.root + "." + key);
+        if (i == g.descriptions.end())
+            continue;
+        auto base = std::string(key) == "children" ? "MAElementDescription"
+                    : target.isRelation()          ? "MAContainer"
+                                                   : "MADescription";
+        i->second->classes = registry.withAllConcreteClasses(base);
+    }
     auto a = addMetadata(g, "accessor", "MAToOneRelationDescription", 10);
-    a->classes = accessorClasses;
+    a->classes = accessorClasses();
     for (const auto &key : {"stringReader", "stringWriter", "validator"}) {
         auto cls = std::string(key) == "stringReader"   ? "MAStringReader"
                    : std::string(key) == "stringWriter" ? "MAStringWriter"
@@ -136,7 +121,9 @@ Graph reflected(const Description &target, Limits limits, bool completeRegistry 
                                        : std::string(key) == "stringWriter" ? "String Writer"
                                                                             : "Validator");
         d->properties["default"] = Value(Value::Class{cls});
-        d->options = {Value(Value::Class{cls})};
+        d->options.clear();
+        for (const auto &name : registry.withAllSubclasses(cls))
+            d->options.push_back(Value(Value::Class{name}));
         d->referenceDescription()->className = "MAClassDescription";
     }
     if (target.isRelation()) {
@@ -144,10 +131,8 @@ Graph reflected(const Description &target, Limits limits, bool completeRegistry 
         d->properties["label"] = Value("Classes");
         d->properties["default"] = Value(Value::Collection{"set", {}});
         d->referenceDescription()->className = "MAClassDescription";
-        for (const auto &name : portableClasses())
-            if (completeRegistry || (name != "MAMemento" && name != "MAStraightMemento" &&
-                                     name != "MACachedMemento" && name != "MACheckedMemento"))
-                d->options.push_back(Value(Value::Class{name}));
+        for (const auto &name : registry.allClasses())
+            d->options.push_back(Value(Value::Class{name}));
     }
     return g;
 }
@@ -159,9 +144,9 @@ Graph accessorMetadata(const AccessorObject &object) {
     if (cls == "MASelectorAccessor")
         addMetadata(g, "selector", "MASymbolDescription");
     if (cls == "MAChainAccessor" || cls == "MADelegatorAccessor") {
-        addMetadata(g, "next", "MAToOneRelationDescription", 100)->classes = accessorClasses;
+        addMetadata(g, "next", "MAToOneRelationDescription", 100)->classes = accessorClasses();
         if (cls == "MAChainAccessor")
-            addMetadata(g, "accessor", "MAToOneRelationDescription", 200)->classes = accessorClasses;
+            addMetadata(g, "accessor", "MAToOneRelationDescription", 200)->classes = accessorClasses();
     }
     return g;
 }
@@ -362,10 +347,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             return s;
         }
         bool kindOf(const std::string &cls) const override {
-            return cls == "Object" || cls == "MABasicObject" || cls == "MAObject" || cls == "MAAccessor" ||
-                   cls == target->value.className ||
-                   (cls == "MADictionaryAccessor" && target->value.className == "MAPropertyAccessor") ||
-                   (cls == "MADelegatorAccessor" && target->value.className == "MAChainAccessor");
+            return ClassRegistry::global().includesBehavior(target->value.className, cls);
         }
         Value readSlot(const std::string &strategy, const std::string &name) const override {
             auto s = state();
@@ -440,8 +422,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         ConditionBinding(std::shared_ptr<State> s, std::shared_ptr<ConditionObject> p)
             : owner(s), target(p) {}
         bool kindOf(const std::string &cls) const override {
-            return cls == "Object" || cls == "MABasicObject" || cls == "MAObject" || cls == "MACondition" ||
-                   cls == target->predicate.className;
+            return ClassRegistry::global().includesBehavior(target->predicate.className, cls);
         }
         Value readUsing(const Description &) const override {
             if (owner.expired())
@@ -554,7 +535,7 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         std::size_t nextGeneration = generation;
         std::vector<std::shared_ptr<Description>> roots;
         for (const auto &d : targets) {
-            auto next = reflected(*d, limits, true);
+            auto next = reflected(*d, limits);
             auto old = next.root;
             auto prefix = "bootstrap." + std::to_string(++nextGeneration) + "." + d->id;
             auto root = next.descriptions.at(old);

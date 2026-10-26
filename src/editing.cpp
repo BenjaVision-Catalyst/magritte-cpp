@@ -59,7 +59,7 @@ bool Description::shouldWrite(const Value &next, const Value &previous, Limits l
     return detail::shouldWrite(*this, next, previous, l, count);
 }
 bool Memento::kindOf(const std::string& name) const {
-    return name == "Object" || name == "MABasicObject" || name == "MAObject" || name == "MAMemento" || name == className() || (className() == "MACheckedMemento" && name == "MACachedMemento");
+    return ClassRegistry::global().includesBehavior(className(),name);
 }
 Memento::Memento(Model &model, std::shared_ptr<Description> description, const Graph *graph, Limits limits)
     : model_(model), description_(std::move(description)), graph_(graph), limits_(limits) {

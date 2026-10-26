@@ -322,21 +322,10 @@ bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
     if (auto r = std::get_if<Value::Reference>(&v.data)) {
         require(graph, "Object reference validation requires a graph resolver"); return graph->resolve(*r).kindOf(kind);
     }
-    if (kind == "Object") return true;
-    if (kind == "UndefinedObject") return v.isNil();
-    if(kind=="Class" || kind=="Behavior" || kind=="ClassDescription")return v.data.index()==10;
-    if (kind == "String") return v.data.index() == 3 || v.data.index() == 8;
-    if (kind == "Symbol") return v.data.index() == 8;
-    if (kind == "Float") return v.data.index() == 9;
-    if (kind == "Character") return v.data.index() == 6;
-    if (kind == "Boolean") return v.data.index() == 1;
-    if (kind == "Number") return detail::isNumber(v);
-    if (kind == "Integer") return v.data.index() == 2;
-    if (kind == "Collection") return v.isCollection();
-    if (kind == "SequenceableCollection") return v.data.index() == 3 || v.data.index() == 8 || v.data.index() == 4 || (v.data.index() == 7 && std::get<Value::Collection>(v.data).kind == "ordered");
-    if (kind == "Array") return v.data.index() == 4;
-    if (auto c = std::get_if<Value::Collection>(&v.data)) return (kind == "Set" && c->kind == "set") || (kind == "Bag" && c->kind == "bag") || (kind == "OrderedCollection" && c->kind == "ordered");
-    return false;
+    static const char* types[]={"UndefinedObject","Boolean","Integer","String","Array",nullptr,"Character",nullptr,"Symbol","Float","Class"};
+    auto type=types[v.data.index()];std::string collection;
+    if(auto c=std::get_if<Value::Collection>(&v.data)){collection=c->kind=="ordered"?"OrderedCollection":c->kind=="set"?"Set":"Bag";type=collection.c_str();}
+    return type && ClassRegistry::global().includesBehavior(type,kind);
 }
 struct Budget {
     Limits limits; std::size_t work = 0;
@@ -540,9 +529,9 @@ Graph Graph::decode(const std::string& input, Limits l) {
             }
             if (d->isRelation()) {
                 require(n.at("classes").is_array(), "Expected classes array");
-                static const std::set<std::string> kinds{"Object", "MABasicObject", "MAAdaptiveModel", "UndefinedObject", "String", "Symbol", "Float", "Boolean", "Number", "Integer", "Character", "Collection", "SequenceableCollection", "Array", "OrderedCollection", "Set", "Bag", "MAObject", "MADescription", "MAElementDescription", "MAReferenceDescription", "MARelationDescription", "MAOptionDescription", "MAMagnitudeDescription", "MAContainer", "MAPriorityContainer", "MAStringDescription", "MASymbolDescription", "MAMemoDescription", "MAPasswordDescription", "MATokenDescription", "MANumberDescription", "MABooleanDescription", "MAToOneRelationDescription", "MAToManyRelationDescription", "MAToManyScalarRelationDescription", "MASingleOptionDescription", "MAMultipleOptionDescription"};
+
                 std::set<std::string> unique;
-                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format >= "magritte.graph/3" || (cls != "Symbol" && cls != "Float" && (cls.rfind("MA", 0) != 0 || cls == "MABasicObject" || cls == "MAAdaptiveModel"))) && (kinds.count(cls) || (g.format=="magritte.graph/4" && detail::knownClass(cls))) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
+                for (const auto& c : n.at("classes")) { auto cls = identity(c); require((g.format >= "magritte.graph/3" || (cls != "Symbol" && cls != "Float" && (cls.rfind("MA", 0) != 0 || cls == "MABasicObject" || cls == "MAAdaptiveModel"))) && detail::knownClass(cls) && unique.insert(cls).second, "Unsupported or duplicate class constraint"); d->classes.push_back(cls); }
             }
             if (d->isOption()) {
                 require(n.at("options").is_array() && n.at("labels").is_array(), "Expected options and labels arrays");

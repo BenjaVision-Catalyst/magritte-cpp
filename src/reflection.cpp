@@ -2,82 +2,10 @@
 #include <algorithm>
 #include <set>
 namespace magritte {
-std::vector<std::string> portableClasses() {
-    static const std::vector<std::string> names{"Object",
-                                                "UndefinedObject",
-                                                "Boolean",
-                                                "Number",
-                                                "Integer",
-                                                "Float",
-                                                "String",
-                                                "Symbol",
-                                                "Character",
-                                                "Collection",
-                                                "SequenceableCollection",
-                                                "Array",
-                                                "OrderedCollection",
-                                                "Set",
-                                                "Bag",
-                                                "Class",
-                                                "ClassDescription",
-                                                "Behavior",
-                                                "MAMemento",
-                                                "MAStraightMemento",
-                                                "MACachedMemento",
-                                                "MACheckedMemento",
-                                                "MABasicObject",
-                                                "MAAdaptiveModel",
-                                                "MAObject",
-                                                "MADescription",
-                                                "MAElementDescription",
-                                                "MAMagnitudeDescription",
-                                                "MAReferenceDescription",
-                                                "MARelationDescription",
-                                                "MAOptionDescription",
-                                                "MAContainer",
-                                                "MAPriorityContainer",
-                                                "MAStringDescription",
-                                                "MASymbolDescription",
-                                                "MAMemoDescription",
-                                                "MAPasswordDescription",
-                                                "MATokenDescription",
-                                                "MANumberDescription",
-                                                "MABooleanDescription",
-                                                "MAClassDescription",
-                                                "MAToOneRelationDescription",
-                                                "MAToManyRelationDescription",
-                                                "MAToManyScalarRelationDescription",
-                                                "MASingleOptionDescription",
-                                                "MAMultipleOptionDescription",
-                                                "MAAccessor",
-                                                "MADictionaryAccessor",
-                                                "MAPropertyAccessor",
-                                                "MASelectorAccessor",
-                                                "MAVariableAccessor",
-                                                "MANullAccessor",
-                                                "MAIdentityAccessor",
-                                                "MADelegatorAccessor",
-                                                "MAChainAccessor",
-                                                "MACondition",
-                                                "MAPluggableCondition",
-                                                "MAConjunctiveCondition",
-                                                "MANegationCondition",
-                                                "MAVisitor",
-                                                "MAReader",
-                                                "MAWriter",
-                                                "MAStringReader",
-                                                "MAStringWriter",
-                                                "MAValidatorVisitor"};
-    auto result = names;
-    std::sort(result.begin(), result.end());
-    return result;
-}
+std::vector<std::string> portableClasses() { return ClassRegistry::global().allClasses(); }
 namespace detail {
-bool knownClass(const std::string &name) {
-    static const auto classes = portableClasses();
-    return std::binary_search(classes.begin(), classes.end(), name);
+bool knownClass(const std::string& name) { return ClassRegistry::global().find(name).has_value(); }
 }
-} // namespace detail
 namespace {
 void identity(const std::string &id, Limits l) {
     if (id.empty() || id.size() > l.bytes ||

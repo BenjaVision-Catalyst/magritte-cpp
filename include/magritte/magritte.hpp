@@ -8,6 +8,9 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <typeindex>
+#include <type_traits>
+#include <utility>
 
 namespace magritte {
 // Portable numbers are signed Int64 and finite IEEE-754 binary64.
@@ -43,6 +46,39 @@ struct Limits {
     std::size_t bytes = 1024 * 1024, depth = 64, nodes = 10000,
                 items = 100000, visits = 100000;
 };
+// Runtime class identities and single-inheritance relationships, analogous to an image's class environment.
+struct ClassInfo {
+    std::string name, superclass;
+    bool isAbstract = false;
+    std::string label;
+    ClassInfo() = default;
+    ClassInfo(std::string name, std::string superclass = "Object", bool isAbstract = false, std::optional<std::string> label = {})
+        : name(std::move(name)), superclass(std::move(superclass)), isAbstract(isAbstract), label(label.value_or(this->name)) {}
+};
+class ClassRegistry {
+    struct State;
+    std::unique_ptr<State> state_;
+    ClassRegistry();
+public:
+    ~ClassRegistry();
+    ClassRegistry(const ClassRegistry&) = delete;
+    ClassRegistry& operator=(const ClassRegistry&) = delete;
+    static ClassRegistry& global();
+    void registerClass(ClassInfo);
+    void registerClasses(const std::vector<ClassInfo>&); // Atomic, including forward superclass references.
+    void registerNativeClass(std::type_index, ClassInfo);
+    template<class T> void registerNativeClass(ClassInfo info) { registerNativeClass(std::type_index(typeid(T)), std::move(info)); }
+    std::optional<std::string> classForNativeType(std::type_index) const;
+    std::optional<ClassInfo> find(const std::string&) const;
+    std::vector<std::string> allClasses() const;
+    std::vector<std::string> subclasses(const std::string&) const;
+    std::vector<std::string> allSubclasses(const std::string&) const;
+    std::vector<std::string> withAllSubclasses(const std::string&) const;
+    std::vector<std::string> withAllConcreteClasses(const std::string&) const;
+    bool includesBehavior(const std::string& className, const std::string& ancestor) const;
+    bool inheritsFrom(const std::string& className, const std::string& ancestor) const;
+    std::optional<std::string> commonSuperclass(const std::vector<std::string>&) const;
+};
 struct ValidationError {
     std::string descriptionId, code, message;
 };
@@ -61,7 +97,7 @@ struct Accessor {
 struct Model {
     virtual ~Model() = default;
     virtual bool usesStoredContainerValues() const { return false; }
-    virtual bool kindOf(const std::string& name) const { return name == "Object"; }
+    virtual bool kindOf(const std::string& name) const { return ClassRegistry::global().includesBehavior("Object", name); }
     virtual Value readSlot(const std::string& strategy, const std::string& name) const;
     virtual void writeSlot(const std::string& strategy, const std::string& name, Value);
     virtual Value readUsing(const Description&) const = 0;
@@ -128,7 +164,7 @@ struct Description : Model {
 struct AdaptiveModel : Model {
     bool usesStoredContainerValues() const override { return true; }
     std::string id;
-    bool kindOf(const std::string& name) const override { return name == "Object" || name == "MABasicObject" || name == "MAAdaptiveModel"; }
+    bool kindOf(const std::string& name) const override { return ClassRegistry::global().includesBehavior("MAAdaptiveModel", name); }
     std::shared_ptr<Description> description;
     // Keys are stable graph description identities, not field names.
     std::map<std::string, Value> values;
@@ -155,6 +191,14 @@ public:
     void writeSlot(const std::string&, const std::string&, Value) override;
     // Caller retains ownership and must outlive this adapter and every access.
     explicit NativeModel(void* object, std::vector<std::string> classes = {}) : object_(object), classes_(std::move(classes)) {}
+    template<class T> static NativeModel registered(T* object) {
+        if (!object) throw Error("Null registered native object");
+        auto name=ClassRegistry::global().classForNativeType(std::type_index(typeid(*object)));
+        if (!name) throw Error("Native type is not registered");
+        void* pointer=object;
+        if constexpr(std::is_polymorphic<T>::value) pointer=dynamic_cast<void*>(object);
+        return NativeModel(pointer,{*name});
+    }
     bool kindOf(const std::string&) const override;
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;
@@ -255,7 +299,7 @@ DescriptionCopy collectDescriptions(std::shared_ptr<Description>, const std::fun
 DescriptionCopy copyEmpty(std::shared_ptr<Description>, const std::string& newId, Limits = {});
 // Native indices are zero-based half-open, unlike Smalltalk copyFrom:to:.
 DescriptionCopy copyRange(std::shared_ptr<Description>, std::size_t begin, std::size_t end, const std::string& newId, Limits = {});
-// Finite registry of portable native equivalents of upstream class objects.
+// Compatibility spelling: a fresh snapshot of runtime-registered class names.
 std::vector<std::string> portableClasses();
 struct AccessorObject {
     std::string id;

@@ -89,7 +89,7 @@ J snapshot(Memento &editor, Model &model, const Example &e, const std::string &p
 }
 void reference(const char *output) {
     auto f = fixture("bootstrap-reference");
-    check(J(portableClasses()) == f.at("registry"), "65 live GT Class identities");
+    for(const auto& name:f.at("registry"))check(ClassRegistry::global().find(name).has_value(),"GT class is available");
     for (const auto &row : f.at("mementos")) {
         Example e;
         auto model = e.model();

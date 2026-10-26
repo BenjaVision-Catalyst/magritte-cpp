@@ -132,16 +132,7 @@ std::vector<std::shared_ptr<Description>> fields(const std::shared_ptr<Descripti
 }
 } // namespace
 bool Description::kindOf(const std::string &name) const {
-    return name == "Object" || name == "MABasicObject" || name == "MAObject" || name == "MADescription" || name == className ||
-           (name == "MAElementDescription" && !isContainer()) || (name == "MAContainer" && isContainer()) ||
-           (name == "MAReferenceDescription" && isReference()) ||
-           (name == "MARelationDescription" && isRelation()) ||
-           (name == "MAOptionDescription" && isOption()) ||
-           (name == "MAMagnitudeDescription" && className == "MANumberDescription") ||
-           (name == "MAToManyRelationDescription" && className == "MAToManyScalarRelationDescription") ||
-           (name == "MAStringDescription" &&
-            (className == "MAMemoDescription" || className == "MAPasswordDescription" ||
-             className == "MASymbolDescription"));
+    return ClassRegistry::global().includesBehavior(className,name);
 }
 bool descriptionEqual(const Description &a, const Description &b, Limits l) {
     Work work{l};

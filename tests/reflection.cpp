@@ -85,14 +85,7 @@ void compare(RecursiveDescriptionModel &ctx, const std::shared_ptr<Model> &model
 }
 void reference(const char *output) {
     auto f = fixture("reflection-reference");
-    auto legacyClasses = portableClasses();
-    legacyClasses.erase(std::remove_if(legacyClasses.begin(), legacyClasses.end(),
-                                       [](const auto &n) {
-                                           return n == "MAMemento" || n == "MAStraightMemento" ||
-                                                  n == "MACachedMemento" || n == "MACheckedMemento";
-                                       }),
-                        legacyClasses.end());
-    check(J(legacyClasses) == f.at("registry"), "Every legacy registry class verified in GT");
+    for(const auto& name:f.at("registry"))check(ClassRegistry::global().find(name).has_value(),"GT class is available");
     Description cls;
     cls.id = "class";
     cls.className = "MAClassDescription";

@@ -146,7 +146,9 @@ std::vector<Value> Description::allOptionsWith(const Value& current, Limits l) c
     return result;
 }
 std::vector<Value> Description::allOptions(Limits l) const { return allOptionsWith({}, l); }
-bool NativeModel::kindOf(const std::string& name) const { return name == "Object" || std::find(classes_.begin(), classes_.end(), name) != classes_.end(); }
+bool NativeModel::kindOf(const std::string& name) const { auto& registry=ClassRegistry::global();
+    bool registered=std::any_of(classes_.begin(),classes_.end(),[&](const auto& cls){return registry.find(cls).has_value();});
+    return (!registered && registry.includesBehavior("Object",name)) || std::any_of(classes_.begin(),classes_.end(),[&](const auto& cls){return cls==name || registry.includesBehavior(cls,name);}); }
 const Model& Graph::resolve(const Value::Reference& r) const {
     const auto a = objects.find(r.id); const auto b = nativeObjects.find(r.id);
     if (a != objects.end() && b != nativeObjects.end()) throw Error("Duplicate portable/native object identity");
