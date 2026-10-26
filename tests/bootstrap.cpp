@@ -1,3 +1,4 @@
+#include "historical.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -35,6 +36,7 @@ J projected(J names) {
     return result;
 }
 J canonical(J j) {
+    omitHistoricalLabelDefaults(j);
     for (auto& d : j["descriptions"]) {
         if (d.contains("classes")) {
             d["classes"] = projected(d["classes"]);

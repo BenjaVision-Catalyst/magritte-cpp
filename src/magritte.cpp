@@ -271,9 +271,13 @@ Value lookup(const std::map<std::string, Value>& m, const std::string& key) {
 } // namespace
 namespace detail { void checkDescription(const Description& d) { supported(d); } }
 bool Description::isContainer() const { return className == "MAContainer" || className == "MAPriorityContainer"; }
-Value Description::property(const std::string& name) const {
+Value Description::property(const std::string &name, Limits limits) const {
     auto it = properties.find(name);
-    if (it != properties.end()) return it->second;
+    if (it != properties.end()) {
+        if (name == "label" || name == "name")
+            (void)encodeValue(it->second, limits);
+        return it->second;
+    }
     if(name=="stringReader")return Value(Value::Class{"MAStringReader"});
     if(name=="stringWriter")return Value(Value::Class{"MAStringWriter"});
     if(name=="validator")return Value(Value::Class{"MAValidatorVisitor"});
@@ -290,7 +294,13 @@ Value Description::property(const std::string& name) const {
     if (name == "shouldCacheDefault") return Value(isRelation() && isMultiple());
     if (name == "priority") return Value(std::int64_t(0));
     if (name == "undefined") return Value("");
-    if (name == "label") return Value(accessorObject ? accessorObject->value.name : accessor ? accessor->name : key); // Explicit difference: no Smalltalk camel-case inflection yet.
+    if (name == "label") {
+        auto result = Value(defaultLabel(limits));
+        (void)encodeValue(result, limits);
+        return result;
+    }
+    if (name == "name")
+        return effectiveAccessor(limits).accessorName(limits);
     return {};
 }
 Value Description::defaultValue() const { return defaultFunction ? defaultFunction() : property(isContainer() ? "undefinedValue" : "default"); }

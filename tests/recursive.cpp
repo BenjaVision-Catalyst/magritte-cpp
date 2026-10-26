@@ -1,3 +1,4 @@
+#include "historical.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -27,6 +28,7 @@ J fixture(const std::string &name) {
     return j;
 }
 J canonical(J j) {
+    omitHistoricalLabelDefaults(j);
     for (auto &node : j["descriptions"])
         if (node.contains("classes"))
             std::sort(node["classes"].begin(), node["classes"].end());

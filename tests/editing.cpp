@@ -1,3 +1,4 @@
+#include "historical.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -291,7 +292,10 @@ int main(int argc, char **argv) {
                 target.properties[p.key()] = value(p.value());
             auto meta = descriptionModelFor(target);
             auto graph = J::parse(meta.encode());
-            check(graph == c.at("graph"),
+            auto historical = c.at("graph");
+            omitHistoricalLabelDefaults(graph);
+            omitHistoricalLabelDefaults(historical);
+            check(graph == historical,
                   "GT self-description graph: " + target.className + "\n" + graph.dump(2));
             for (const auto &read : c.at("reads"))
                 check(target.readUsing(*meta.descriptions.at(read.at("field"))) == value(read.at("value")),

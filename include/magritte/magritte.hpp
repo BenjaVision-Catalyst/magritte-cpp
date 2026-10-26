@@ -148,6 +148,8 @@ struct Accessor {
     bool canWrite(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     Value read(const struct Model&, const Graph* = nullptr, Limits = {}) const;
     void write(struct Model&, Value, Graph* = nullptr, Limits = {}) const;
+    Value accessorName(Limits = {}) const;
+    std::string defaultLabelFor(const Description &, Limits = {}) const;
     void check(Limits = {}) const;
 };
 struct Model {
@@ -179,6 +181,10 @@ struct Condition {
 };
 class Visitor;
 struct Description : Model {
+  private:
+    mutable std::optional<Accessor> defaultNullAccessor_;
+
+  public:
     virtual void acceptMagritte(Visitor&);
     bool kindOf(const std::string&) const override;
     std::string id, className = "MAStringDescription", key;
@@ -195,7 +201,7 @@ struct Description : Model {
     // Live accessor identity is local; materialize explicitly before graph export.
     std::shared_ptr<AccessorObject> accessorObject;
     void materializeAccessor(Limits = {});
-    Accessor effectiveAccessor() const;
+    Accessor effectiveAccessor(Limits = {}) const;
     std::function<Value(const void*)> nativeRead;
     std::function<void(void*, const Value&)> nativeWrite;
     std::function<Value()> defaultFunction;
@@ -210,7 +216,9 @@ struct Description : Model {
     std::string labelForOption(const Value&, Limits = {}) const;
     std::string obfuscated(const Value&, Limits = {}) const;
     bool isObfuscated(const Value&) const;
-    Value property(const std::string&) const;
+    Value property(const std::string &, Limits = {}) const;
+    std::string defaultLabel(Limits = {}) const;
+    bool hasLabel(Limits = {}) const;
     Value defaultValue() const;
     bool isIgnorableValue(const Value&, Limits = {}) const;
     bool shouldWrite(const Value& candidate, const Value& previous, Limits = {}) const;

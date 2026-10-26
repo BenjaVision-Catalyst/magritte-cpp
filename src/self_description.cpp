@@ -31,6 +31,10 @@ bool metadataSelector(const Description &d, const std::string &name, bool writin
                                               "undefinedValue", "shouldCacheDefault", "stringReader", "stringWriter", "validator"};
     if (common.count(name))
         return true;
+    if (name == "name")
+        return true;
+    if (name == "defaultLabel" || name == "hasLabel")
+        return !writing;
     if (name == "type")
         return !writing;
     if (name == "default")
@@ -94,9 +98,7 @@ Graph descriptionModelFor(const Description &target, Limits limits) {
     };
     auto type = add("type", "MAStringDescription", "Kind", 0);
     type->properties["readOnly"] = Value(true);
-    auto fallback = target;
-    fallback.properties.erase("label");
-    add("label", "MAStringDescription", "Label", 100, fallback.property("label"));
+    add("label", "MAStringDescription", "Label", 100, Value(target.defaultLabel(limits)));
     add("comment", "MAMemoDescription", "Comment", 110, Value());
     add("group", "MAStringDescription", "Group", 105, Value());
     auto priority = add("priority", "MANumberDescription", "Priority", 130, Value(std::int64_t(0)));

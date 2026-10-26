@@ -1,3 +1,4 @@
+#include <random>
 #include "detail.hpp"
 #include <algorithm>
 #include <charconv>
@@ -289,6 +290,66 @@ bool accessCan(const Accessor &a, CapabilityTarget target, const Graph *g, Work 
         target = {nullptr, &next};
     }
     return accessCan(a.steps.back(), target, g, w, depth + 1, writing);
+}
+std::string boundedJoin(const std::string &left, const std::string &right, Work &w,
+                        std::size_t depth) {
+    need(left.size() <= w.l.bytes && right.size() <= w.l.bytes && w.l.bytes - left.size() >= 2 &&
+             w.l.bytes - left.size() - 2 >= right.size(),
+         "Accessor text byte limit");
+    w.tick(depth, left.size() + 2 + right.size());
+    return left + "::" + right;
+}
+Value inferredName(const Accessor &a, Work &w, std::size_t depth) {
+    w.tick(depth);
+    if (a.className == "MAIdentityAccessor" || a.className == "MANullAccessor" ||
+        a.className == "MAPluggableAccessor")
+        return {};
+    if (a.className == "MADelegatorAccessor")
+        return inferredName(a.steps.front(), w, depth + 1);
+    if (a.className == "MAChainAccessor") {
+        auto result = inferredName(a.steps.back(), w, depth + 1);
+        for (std::size_t i = a.steps.size() - 1; i > 0; --i) {
+            const bool symbol = result.data.index() == 8;
+            auto head = inferredName(a.steps[i - 1], w, depth + 1);
+            auto joined = boundedJoin(text(result), text(head), w, depth);
+            result = symbol ? Value(Value::Symbol{joined}) : Value(joined);
+        }
+        return result;
+    }
+    if (a.className == "MASelectorAccessor" && a.name.empty())
+        return {};
+    return a.className == "MAVariableAccessor" ? Value(a.name) : Value(Value::Symbol{a.name});
+}
+std::string inferredLabel(const Accessor &a, Work &w, std::size_t depth) {
+    w.tick(depth);
+    if (a.className == "MAIdentityAccessor" || a.className == "MANullAccessor" ||
+        a.className == "MAVariableAccessor" || a.className == "MAPluggableAccessor")
+        return "";
+    if (a.className == "MADelegatorAccessor")
+        return inferredLabel(a.steps.front(), w, depth + 1);
+    if (a.className == "MAChainAccessor") {
+        auto result = inferredLabel(a.steps.front(), w, depth + 1);
+        for (std::size_t i = 1; i < a.steps.size(); ++i)
+            result = boundedJoin(result, inferredLabel(a.steps[i], w, depth + 1), w, depth);
+        return result;
+    }
+    const auto source = a.className == "MASelectorAccessor" && a.name.empty() ? "nil" : a.name;
+    std::string result;
+    auto upper = [](unsigned char c) { return c >= 'A' && c <= 'Z'; };
+    for (unsigned char c : source) {
+        need(c < 128, "Non-ASCII inferred labels require an explicit label");
+        if (upper(c) && !result.empty() && !upper(static_cast<unsigned char>(result.back()))) {
+            w.tick(depth);
+            need(result.size() < w.l.bytes, "Accessor text byte limit");
+            result += ' ';
+        }
+        w.tick(depth);
+        need(result.size() < w.l.bytes, "Accessor text byte limit");
+        result += static_cast<char>(c);
+    }
+    if (!result.empty() && result.front() >= 'a' && result.front() <= 'z')
+        result.front() += 'A' - 'a';
+    return result;
 }
 std::string propText(const Description &d, const std::string &name) {
     auto v = d.property(name);
@@ -658,6 +719,25 @@ void Accessor::write(Model &m, Value v, Graph *g, Limits l) const {
     checkAccessor(*this, w, 0);
     accessWrite(*this, m, std::move(v), g, w, 0);
 }
+Value Accessor::accessorName(Limits limits) const {
+    Work work{limits};
+    checkAccessor(*this, work, 0);
+    auto result = inferredName(*this, work, 0);
+    (void)encodeValue(result, limits);
+    return result;
+}
+std::string Accessor::defaultLabelFor(const Description &, Limits limits) const {
+    Work work{limits};
+    checkAccessor(*this, work, 0);
+    return inferredLabel(*this, work, 0);
+}
+std::string Description::defaultLabel(Limits limits) const {
+    return effectiveAccessor(limits).defaultLabelFor(*this, limits);
+}
+bool Description::hasLabel(Limits limits) const {
+    const auto label = property("label", limits);
+    return !label.isNil() && !text(label).empty();
+}
 Accessor Accessor::pluggable(std::shared_ptr<const ReadBlock> read,
                              std::shared_ptr<const WriteBlock> write) {
     Accessor result;
@@ -699,10 +779,25 @@ Value Model::readSlot(const std::string &, const std::string &) const {
 void Model::writeSlot(const std::string &, const std::string &, Value) {
     throw Error("Unbound accessor write");
 }
-Accessor Description::effectiveAccessor() const {
-    if(accessorObject)return accessorObject->snapshot();
+Accessor Description::effectiveAccessor(Limits limits) const {
+    if (accessorObject)
+        return accessorObject->snapshot(limits);
     if (accessor)
         return *accessor;
+    if (!isContainer() && key.empty()) {
+        if (!defaultNullAccessor_) {
+            Accessor a;
+            a.className = "MANullAccessor";
+            Value::Array token;
+            std::random_device random;
+            std::uniform_int_distribution<unsigned> byte(0, 255);
+            for (int i = 0; i < 16; ++i)
+                token.emplace_back(std::int64_t(byte(random)));
+            a.uuid = Value(std::move(token));
+            defaultNullAccessor_ = std::move(a);
+        }
+        return *defaultNullAccessor_;
+    }
     Accessor a;
     a.className = isContainer() ? "MAIdentityAccessor" : "MADictionaryAccessor";
     a.name = isContainer() ? "" : key;
@@ -711,6 +806,10 @@ Accessor Description::effectiveAccessor() const {
 Value Description::readSlot(const std::string &strategy, const std::string &name) const {
     if(strategy == "MASelectorAccessor") {
         need(detail::metadataSelector(*this,name,false), "Unsupported description getter");
+        if (name == "defaultLabel")
+            return Value(defaultLabel());
+        if (name == "hasLabel")
+            return Value(hasLabel());
         if(name=="type")return Value(detail::descriptionType(*this));
         if(name=="default")return defaultValue();
         auto value=property(name);if(name=="undefined"&&value.isNil())return Value("");return value;
