@@ -1,6 +1,6 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.3 adds portable conditions, accessor strategies, scalar types and text conversion; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.4 adds straight/cached/checked editing mementos and expanded self-description; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
@@ -52,3 +52,5 @@ auto choices = graph.descriptions.at("status")->allOptions();
 ```
 
 The 0.3 phase adds labelled portable MACondition objects, dictionary/property/selector/variable/identity/null/chain accessors, memo/password/token descriptions, finite binary64, and MAStringReader/Writer behavior. See [portable-behavior.md](docs/portable-behavior.md) for executed GT evidence, APIs, numeric policies and remaining gaps. Graph/3 carries these forms; legacy graph/1 and graph/2 remain readable. Native names require host bindings; callback behavior remains local.
+
+The 0.4 phase adds editing and metadata editors, including original/cache tracking, conflict reset and selective checked commits. Class-specific self-description covers all fourteen supported classes through ordinary selector accessors. See [editing.md](docs/editing.md) for APIs, GT/upstream evidence, collection snapshot boundaries and remaining metadata gaps. Editing state stays local; committed descriptions and objects use graph/3.

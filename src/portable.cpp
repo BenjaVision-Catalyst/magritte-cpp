@@ -362,7 +362,7 @@ std::string writeModel(const Description &d, const Model &model, const Graph *g,
         first = false;
         if (!child->flag("visible"))
             continue;
-        if (child->isContainer() && !dynamic_cast<const AdaptiveModel *>(&model) && !child->nativeRead &&
+        if (child->isContainer() && !model.usesStoredContainerValues() && !child->nativeRead &&
             (!child->accessor || child->accessor->className == "MAIdentityAccessor"))
             result += writeModel(*child, model, g, w, depth + 1);
         else
@@ -600,11 +600,23 @@ Accessor Description::effectiveAccessor() const {
     return a;
 }
 Value Description::readSlot(const std::string &strategy, const std::string &name) const {
+    if(strategy == "MASelectorAccessor") {
+        need(detail::metadataSelector(*this,name,false), "Unsupported description getter");
+        if(name=="type")return Value(detail::descriptionType(*this));
+        if(name=="default")return defaultValue();
+        auto value=property(name);if(name=="undefined"&&value.isNil())return Value("");return value;
+    }
     need(strategy == "MAPropertyAccessor", "Description slot requires property accessor");
     auto it = properties.find(name);
     return it == properties.end() ? Value() : it->second;
 }
 void Description::writeSlot(const std::string &strategy, const std::string &name, Value v) {
+    if(strategy == "MASelectorAccessor") {
+        need(!name.empty() && name.back()==':', "Description setter requires a keyword selector");
+        auto key=name.substr(0,name.size()-1);need(detail::metadataSelector(*this,key,true),"Unsupported description setter");
+        if(key=="default")defaultFunction={};
+        properties[key]=std::move(v);return;
+    }
     need(strategy == "MAPropertyAccessor", "Description slot requires property accessor");
     properties[name] = std::move(v);
 }

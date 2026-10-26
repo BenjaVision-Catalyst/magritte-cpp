@@ -56,6 +56,7 @@ struct Accessor {
 };
 struct Model {
     virtual ~Model() = default;
+    virtual bool usesStoredContainerValues() const { return false; }
     virtual bool kindOf(const std::string& name) const { return name == "Object"; }
     virtual Value readSlot(const std::string& strategy, const std::string& name) const;
     virtual void writeSlot(const std::string& strategy, const std::string& name, Value);
@@ -106,6 +107,8 @@ struct Description : Model {
     bool isObfuscated(const Value&) const;
     Value property(const std::string&) const;
     Value defaultValue() const;
+    bool isIgnorableValue(const Value&, Limits = {}) const;
+    bool shouldWrite(const Value& candidate, const Value& previous, Limits = {}) const;
     bool flag(const std::string&) const;
     std::int64_t priority() const;
     std::vector<std::shared_ptr<Description>> orderedChildren() const;
@@ -115,6 +118,7 @@ struct Description : Model {
     void writeSlot(const std::string&, const std::string&, Value) override;
 };
 struct AdaptiveModel : Model {
+    bool usesStoredContainerValues() const override { return true; }
     std::string id;
     bool kindOf(const std::string& name) const override { return name == "Object" || name == "MABasicObject" || name == "MAAdaptiveModel"; }
     std::shared_ptr<Description> description;
@@ -159,6 +163,66 @@ struct Graph {
     static Graph decode(const std::string&, Limits = {});
     std::string encode(Limits = {}) const;
 };
+// Editing adapters borrow their model and resolver; both must outlive the memento.
+class Memento : public Model {
+protected:
+    Model& model_;
+    std::shared_ptr<Description> description_;
+    const Graph* graph_;
+    Limits limits_;
+    std::vector<std::shared_ptr<Description>> fields() const;
+public:
+    Memento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    Model& model() const { return model_; }
+    const std::shared_ptr<Description>& description() const { return description_; }
+    bool usesStoredContainerValues() const override { return true; }
+    virtual void reset() = 0;
+    virtual void commit() = 0; // Does not implicitly validate or provide a transaction.
+    virtual std::vector<ValidationError> validate();
+};
+class StraightMemento final : public Memento {
+public:
+    using Memento::Memento;
+    Value readUsing(const Description&) const override;
+    void writeUsing(const Description&, Value) override;
+    void reset() override {}
+    void commit() override {}
+};
+class CachedMemento : public Memento {
+public:
+    using Values = std::map<std::string, Value>;
+protected:
+    struct Entry { std::shared_ptr<Description> description; Value value; };
+    std::map<std::string, Entry> cache_;
+    std::vector<std::string> order_;
+    void checkIdentities() const;
+    CachedMemento(Model&, std::shared_ptr<Description>, const Graph*, Limits, bool initialize);
+    Values pullRaw() const;
+    bool changed(const Values&, const Values&) const;
+    virtual bool shouldPush(const Entry&, const Value& current, std::size_t& work) const;
+public:
+    CachedMemento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    Values cache() const;
+    bool hasChanges() const;
+    Value readUsing(const Description&) const override;
+    void writeUsing(const Description&, Value) override;
+    void reset() override;
+    void commit() override;
+};
+class CheckedMemento final : public CachedMemento {
+    Values original_;
+    bool shouldPush(const Entry&, const Value& current, std::size_t& work) const override;
+public:
+    CheckedMemento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    const Values& original() const { return original_; }
+    bool hasModelChangedElsewhere() const;
+    bool hasConflict() const;
+    void reset() override;
+    std::vector<ValidationError> validate() override;
+};
+// Expanded, class-specific metadata descriptions using upstream selector accessors.
+// This returns a graph so its weak reference descriptions retain an owner.
+Graph descriptionModelFor(const Description&, Limits = {});
 // MAStringReader/MAStringWriter; these do not validate values or apply defaults.
 Value readString(const Description&, const std::string&, Limits = {});
 std::string writeString(const Description&, const Value&, const Graph* = nullptr, Limits = {});

@@ -273,10 +273,10 @@ Value Description::property(const std::string& name) const {
     if (name == "shouldCacheDefault") return Value(isRelation() && isMultiple());
     if (name == "priority") return Value(std::int64_t(0));
     if (name == "undefined") return Value("");
-    if (name == "label") return Value(key); // Explicit difference: no Smalltalk camel-case inflection yet.
+    if (name == "label") return Value(accessor ? accessor->name : key); // Explicit difference: no Smalltalk camel-case inflection yet.
     return {};
 }
-Value Description::defaultValue() const { return defaultFunction ? defaultFunction() : property("default"); }
+Value Description::defaultValue() const { return defaultFunction ? defaultFunction() : property(isContainer() ? "undefinedValue" : "default"); }
 bool Description::flag(const std::string& name) const {
     auto v = property(name); require(std::holds_alternative<bool>(v.data), "Expected Boolean flag"); return std::get<bool>(v.data);
 }
@@ -346,7 +346,7 @@ std::vector<ValidationError> validateModel(const Description& d, const Model& mo
     std::vector<ValidationError> errors;
     for (const auto& c : d.orderedChildren()) {
         std::vector<ValidationError> e;
-        if (c->isContainer() && (dynamic_cast<const AdaptiveModel*>(&model) || c->nativeRead || (c->accessor && c->accessor->className != "MAIdentityAccessor")))
+        if (c->isContainer() && (model.usesStoredContainerValues() || c->nativeRead || (c->accessor && c->accessor->className != "MAIdentityAccessor")))
             e = validateField(*c, model.readUsing(*c), graph, budget, depth + 1);
         else e = validateModel(*c, model, graph, budget, depth + 1);
         errors.insert(errors.end(), e.begin(), e.end());
