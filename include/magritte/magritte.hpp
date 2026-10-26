@@ -110,6 +110,7 @@ struct ValidationError {
 struct AccessorObject;
 struct ConditionObject;
 struct Description;
+struct DescriptionContext;
 struct Graph;
 // MADynamicOptions stays a live local provider, with independent completion/membership/reader callbacks.
 struct DynamicOptions {
@@ -216,6 +217,7 @@ struct Description : Model {
     virtual void acceptMagritte(Visitor&);
     bool kindOf(const std::string&) const override;
     std::string id, className = "MAStringDescription", key;
+    std::shared_ptr<DescriptionContext> definingContext;
     std::map<std::string, Value> properties;
     std::vector<std::shared_ptr<Description>> children;
     // Graph owns descriptions. Non-owning reference edges permit recursive models.
@@ -388,6 +390,100 @@ struct DescriptionCopy {
     std::shared_ptr<Description> root;
     // Own copied reference descriptions and shared descendants/references.
     std::vector<std::shared_ptr<Description>> retained;
+    std::shared_ptr<void> lifetime; // shared scoped discovery ownership, when present
+};
+// Native method metadata is registered at runtime; callbacks are never wire data.
+class PragmaBuilder;
+struct DescriptionTarget {
+    Model *model;
+    std::string className;
+    const void *identity;
+    std::shared_ptr<Model> owner;
+    DescriptionTarget(Model &model, std::string className, const void *identity = nullptr)
+        : model(&model), className(std::move(className)), identity(identity ? identity : &model) {}
+    DescriptionTarget(std::shared_ptr<Model> model, std::string className)
+        : model(model.get()), className(std::move(className)), identity(model.get()),
+          owner(std::move(model)) {}
+};
+struct DescriptionPragma {
+    std::string selector;
+    std::vector<Value> arguments;
+};
+struct DescriptionRequest {
+    DescriptionTarget target;
+    PragmaBuilder &builder;
+};
+struct DescriptionMethod {
+    std::string className, selector;
+    std::size_t arguments = 0;
+    std::vector<DescriptionPragma> pragmas;
+    std::function<DescriptionCopy(DescriptionRequest &, std::shared_ptr<Description>)> operation;
+};
+class DescriptionMethodRegistry {
+    struct State;
+    std::unique_ptr<State> state_;
+    DescriptionMethodRegistry();
+
+  public:
+    ~DescriptionMethodRegistry();
+    static DescriptionMethodRegistry &global();
+    void install(DescriptionMethod); // recompilation replaces an existing class/selector binding
+    void remove(const std::string &className, const std::string &selector);
+    std::optional<DescriptionMethod> lookup(const std::string &className,
+                                            const std::string &selector) const;
+    std::vector<DescriptionMethod> annotated(const std::string &className,
+                                             const std::string &pragma) const;
+};
+struct DescriptionContext {
+    std::optional<std::string> modelClass, methodSelector;
+    bool operator==(const DescriptionContext &) const;
+    std::size_t hash() const;
+    std::optional<std::string> methodClass() const;
+    std::optional<DescriptionMethod> compiledMethod() const;
+};
+class DynamicDescriptionCache : public std::enable_shared_from_this<DynamicDescriptionCache> {
+    struct State;
+    std::unique_ptr<State> state_;
+    friend class PragmaBuilder;
+
+  public:
+    explicit DynamicDescriptionCache(std::string idPrefix = "description", Limits = {});
+    ~DynamicDescriptionCache();
+    static std::shared_ptr<DynamicDescriptionCache> current(); // fresh default outside a scope
+    std::size_t size() const;
+};
+class DescriptionCacheScope {
+    std::shared_ptr<DynamicDescriptionCache> previous_;
+
+  public:
+    explicit DescriptionCacheScope(std::shared_ptr<DynamicDescriptionCache>);
+    ~DescriptionCacheScope();
+    DescriptionCacheScope(const DescriptionCacheScope &) = delete;
+    DescriptionCacheScope &operator=(const DescriptionCacheScope &) = delete;
+};
+class DescribedObjectScope {
+    std::optional<DescriptionTarget> previous_;
+
+  public:
+    explicit DescribedObjectScope(DescriptionTarget);
+    ~DescribedObjectScope();
+    static std::optional<DescriptionTarget> current();
+    DescribedObjectScope(const DescribedObjectScope &) = delete;
+    DescribedObjectScope &operator=(const DescribedObjectScope &) = delete;
+};
+class PragmaBuilder {
+    Limits limits_;
+    DescriptionCopy invoke(DescriptionTarget, const std::string &, std::shared_ptr<Description>,
+                           std::size_t);
+
+  public:
+    explicit PragmaBuilder(Limits limits = {}) : limits_(limits) {}
+    virtual ~PragmaBuilder() = default;
+    virtual std::string containerPragma() const { return "magritteContainer"; }
+    virtual std::string descriptionPragma() const { return "magritteDescription"; }
+    virtual std::string extensionPragma() const { return "magritteDescription:"; }
+    DescriptionCopy forTarget(DescriptionTarget, const std::string &idPrefix);
+    std::string freshId();
 };
 // MAVisitor dispatches one description. Child/reference traversal belongs to the visitor.
 class Visitor {

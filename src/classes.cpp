@@ -83,6 +83,8 @@ ClassRegistry::ClassRegistry() : state_(std::make_unique<State>()) {
          {"Fraction", "Number", false, "Fraction"},
          {"MAComposedDescriptionBuilder", "MADescriptionBuilder", false,
           "Composed Description Builder"},
+         {"MAPragmaBuilder", "MABasicObject", false, "Pragma Builder"},
+         {"MADescriptionContext", "MABasicObject", false, "Description Context"},
          {"MADescriptionFlattener", "MADescriptionBuilder", false, "Description Flattener"},
          {"MACompositeAccessor", "MAChainAccessor", false, "Composite Accessor"},
          {"MACompositeConflict", "Object", false, "MACompositeConflict"},

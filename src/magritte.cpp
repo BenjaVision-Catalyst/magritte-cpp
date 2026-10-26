@@ -584,6 +584,24 @@ Graph Graph::decode(const std::string& input, Limits l) {
             auto d = std::make_shared<Description>();
             d->id = identity(n.at("id")); d->className = string(n.at("class"));
             auto shape = n; if (g.format >= "magritte.graph/3") shape.erase("conditions");
+            if (n.contains("definingContext")) {
+                require(g.format == "magritte.graph/4", "Defining context requires graph/4");
+                shape.erase("definingContext");
+                const auto &context = n.at("definingContext");
+                keys(context, {"modelClass", "methodSelector"});
+                auto cls = value(context.at("modelClass"), l),
+                     selector = value(context.at("methodSelector"), l);
+                require(cls.isNil() || cls.data.index() == 10,
+                        "Context modelClass must be Class or nil");
+                require(selector.isNil() || selector.data.index() == 8,
+                        "Context selector must be Symbol or nil");
+                d->definingContext = std::make_shared<DescriptionContext>();
+                if (!cls.isNil())
+                    d->definingContext->modelClass = std::get<Value::Class>(cls.data).name;
+                if (!selector.isNil())
+                    d->definingContext->methodSelector =
+                        std::get<Value::Symbol>(selector.data).utf8;
+            }
             if (d->isContainer()) keys(shape, {"id", "class", "properties", "children"});
             else if (d->isRelation()) keys(shape, {"id", "class", "properties", "accessor", "reference", "classes"});
             else if (d->isOption()) keys(shape, {"id", "class", "properties", "accessor", "reference", "options", "labels"});
@@ -719,6 +737,18 @@ std::string Graph::encode(Limits l) const {
             require(!d.accessorObject, "Live accessor identity is local; materialize an explicit snapshot before export");
             require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction, "Local executable behavior is not portable");
             J n{{"id", d.id}, {"class", d.className}, {"properties", J::object()}};
+            if (d.definingContext) {
+                require(format == "magritte.graph/4", "Defining context requires graph/4");
+                const auto &context = *d.definingContext;
+                n["definingContext"] =
+                    J{{"modelClass",
+                       wire(context.modelClass ? Value(Value::Class{*context.modelClass}) : Value(),
+                            l)},
+                      {"methodSelector",
+                       wire(context.methodSelector ? Value(Value::Symbol{*context.methodSelector})
+                                                   : Value(),
+                            l)}};
+            }
             for (const auto& prop : d.properties) n["properties"][prop.first] = wire(prop.second, l);
             if (format >= "magritte.graph/3") {
                 n["conditions"] = J::array();
