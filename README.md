@@ -2,6 +2,8 @@
 
 A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.26 adds the generic-object nil-read fallback; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
+The [current gap analysis](docs/gap-analysis.md) prioritizes missing upstream semantics and records acceptance gates for both ports. Its [structured ledger](docs/gap-analysis.json) distinguishes native limitations, missing behavior and deferred reference evidence.
+
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
 ```sh
