@@ -289,7 +289,7 @@ struct Description : Model {
     bool isContainer() const;
     bool isRelation() const;
     bool isOption() const;
-    bool isReference() const { return isRelation() || isOption() || className == "MATokenDescription"; }
+    bool isReference() const;
     bool isMultiple() const;
     std::shared_ptr<Description> referenceDescription() const;
     Description &setUndefined(Value, Limits = {});

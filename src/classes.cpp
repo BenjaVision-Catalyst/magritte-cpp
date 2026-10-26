@@ -1,3 +1,4 @@
+#include "detail.hpp"
 #include <algorithm>
 #include <magritte/magritte.hpp>
 #include <mutex>
@@ -257,3 +258,28 @@ std::optional<std::string> ClassRegistry::commonSuperclass(const std::vector<std
     return {};
 }
 } // namespace magritte
+
+namespace magritte::detail {
+bool descriptionIs(const Description &d, const std::string &ancestor) {
+    return ClassRegistry::global().includesBehavior(d.className, ancestor);
+}
+std::string descriptionImplementation(const Description &d) {
+    // These are executable implementations, not the universe of registered classes.
+    static const std::set<std::string> implementations{
+        "MAContainer", "MAPriorityContainer", "MAStringDescription", "MASymbolDescription",
+        "MAMemoDescription", "MAPasswordDescription", "MATokenDescription", "MANumberDescription",
+        "MABooleanDescription", "MAToOneRelationDescription", "MAToManyRelationDescription",
+        "MAToManyScalarRelationDescription", "MASingleOptionDescription",
+        "MAMultipleOptionDescription", "MAClassDescription"};
+    auto &registry = ClassRegistry::global();
+    auto info = registry.find(d.className);
+    if (!info || info->isAbstract)
+        throw Error("Unsupported description class: " + d.className);
+    while (info) {
+        if (implementations.count(info->name))
+            return info->name;
+        info = registry.find(info->superclass);
+    }
+    throw Error("Unsupported description class: " + d.className);
+}
+} // namespace magritte::detail

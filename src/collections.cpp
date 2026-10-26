@@ -110,18 +110,20 @@ bool Value::operator==(const Value& v) const {
     Limits local; local.visits = static_cast<std::size_t>(-1); local.depth = static_cast<std::size_t>(-1);
     return detail::valueKey(*this, local, work) == detail::valueKey(v, local, work);
 }
-bool Description::isRelation() const {
-    return className == "MAToOneRelationDescription" || className == "MAToManyRelationDescription" || className == "MAToManyScalarRelationDescription";
+bool Description::isRelation() const { return detail::descriptionIs(*this, "MARelationDescription"); }
+bool Description::isOption() const { return detail::descriptionIs(*this, "MAOptionDescription"); }
+bool Description::isReference() const { return detail::descriptionIs(*this, "MAReferenceDescription"); }
+bool Description::isMultiple() const {
+    return detail::descriptionIs(*this, "MAToManyRelationDescription") ||
+           detail::descriptionIs(*this, "MAMultipleOptionDescription");
 }
-bool Description::isOption() const { return className == "MASingleOptionDescription" || className == "MAMultipleOptionDescription"; }
-bool Description::isMultiple() const { return className == "MAToManyRelationDescription" || className == "MAToManyScalarRelationDescription" || className == "MAMultipleOptionDescription"; }
 std::string Description::labelForOption(const Value &v, Limits l, const Graph *graph) const {
     std::size_t work = 0; auto key = detail::valueKey(v, l, work);
     auto bounded = [&](const std::string& text) {
         if (text.size() > l.bytes || work > l.visits || text.size() > l.visits - work) throw Error("Option label output limit");
         work += text.size(); return text;
     };
-    if (className == "MABooleanDescription") {
+    if (detail::descriptionIs(*this, "MABooleanDescription")) {
         if (auto b = std::get_if<bool>(&v.data)) return bounded(std::get<std::string>(property(*b ? "trueString" : "falseString").data));
         return bounded(std::get<std::string>(property("undefined").data));
     }
@@ -133,7 +135,7 @@ std::string Description::labelForOption(const Value &v, Limits l, const Graph *g
     return bounded(displayStringFor(v, graph, l));
 }
 Options Description::allOptionsWith(const Value &current, Limits l, const Graph *graph) const {
-    if (className == "MABooleanDescription") { if(l.visits<2||l.items<2)throw Error("Boolean option item/work limit");return {Value(false),Value(true)}; }
+    if (detail::descriptionIs(*this, "MABooleanDescription")) { if(l.visits<2||l.items<2)throw Error("Boolean option item/work limit");return {Value(false),Value(true)}; }
     if (!isOption()) throw Error("Option operation requires option description");
     if (options.isDynamic()) {
         // shouldNotInclude: short-circuits before copying; dynamic sources have no copyWith:.

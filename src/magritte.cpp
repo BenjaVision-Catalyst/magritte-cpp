@@ -233,21 +233,7 @@ Accessor accessorValue(const J &j, Limits l, std::size_t depth = 0) {
     return a;
 }
 void supported(const Description &d) {
-    static const std::set<std::string> classes{"MAContainer",
-                                               "MAPriorityContainer",
-                                               "MAStringDescription",
-                                               "MASymbolDescription",
-                                               "MAMemoDescription",
-                                               "MAPasswordDescription",
-                                               "MATokenDescription",
-                                               "MANumberDescription",
-                                               "MABooleanDescription",
-                                               "MAToOneRelationDescription",
-                                               "MAToManyRelationDescription",
-                                               "MAToManyScalarRelationDescription",
-                                               "MASingleOptionDescription",
-                                               "MAMultipleOptionDescription", "MAClassDescription"};
-    require(classes.count(d.className), "Unsupported description class: " + d.className);
+    (void)detail::descriptionImplementation(d);
     for (const auto &p : d.properties) {
         const auto &k = p.first;
         const auto &v = p.second;
@@ -256,16 +242,16 @@ void supported(const Description &d) {
             k == "extensible" || k == "shouldCacheDefault")
             require(std::holds_alternative<bool>(v.data), "Expected Boolean property: " + k);
         else if (k == "separators" || k == "trueString" || k == "falseString") {
-            require((k == "separators" && d.className == "MATokenDescription") ||
-                        (k != "separators" && d.className == "MABooleanDescription"),
+            require((k == "separators" && detail::descriptionIs(d, "MATokenDescription")) ||
+                        (k != "separators" && detail::descriptionIs(d, "MABooleanDescription")),
                     "Text setting does not apply");
             require(std::holds_alternative<std::string>(v.data), "Expected text setting");
         } else if (k == "thousandsSeparator") {
-            require(d.className == "MANumberDescription" && v.data.index() == 6 &&
+            require(detail::descriptionIs(d, "MANumberDescription") && v.data.index() == 6 &&
                         Value(std::get<Value::Character>(v.data).utf8).elements().size() == 1,
                     "Expected thousands separator character");
         } else if (k == "lineCount")
-            require(d.className == "MAMemoDescription" && v.data.index() == 2, "Expected memo line count");
+            require(detail::descriptionIs(d, "MAMemoDescription") && v.data.index() == 2, "Expected memo line count");
         else if (k == "maPrintString" || k == "maPrintStringSeparator")
             require(v.isNil(), "Print settings require local callable slots or explicit nil");
         else if (k == "displayBlockOrSymbol")
@@ -274,7 +260,7 @@ void supported(const Description &d) {
         else if (k == "priority")
             require(detail::isNumber(v), "Expected numeric priority");
         else if (k == "min" || k == "max") {
-            require(d.className == "MANumberDescription", "Range requires number description");
+            require(detail::descriptionIs(d, "MANumberDescription"), "Range requires number description");
             require(v.isNil() || detail::isNumber(v), "Unsupported numeric bound");
             if (auto n = std::get_if<double>(&v.data))
                 (void)detail::floatBits(*n);
@@ -319,7 +305,7 @@ void supported(const Description &d) {
         if (!d.properties.count(k))
             continue;
         require((std::string(k) == "extensible" && d.isOption()) ||
-                    (std::string(k) == "distinct" && d.className == "MAMultipleOptionDescription") ||
+                    (std::string(k) == "distinct" && detail::descriptionIs(d, "MAMultipleOptionDescription")) ||
                     (std::string(k) == "ordered" && d.isMultiple()) ||
                     (std::string(k) == "definitive" && d.isRelation() && d.isMultiple()) ||
                     (std::string(k) == "sorted" && (d.isOption() || (d.isRelation() && d.isMultiple()))),
@@ -331,7 +317,7 @@ Value lookup(const std::map<std::string, Value>& m, const std::string& key) {
 }
 } // namespace
 namespace detail { void checkDescription(const Description& d) { supported(d); } }
-bool Description::isContainer() const { return className == "MAContainer" || className == "MAPriorityContainer"; }
+bool Description::isContainer() const { return detail::descriptionIs(*this, "MAContainer"); }
 Value Description::property(const std::string &name, Limits limits) const {
     if (name == "displayBlockOrSymbol" && displayBlock)
         throw Error("Display block is local; inspect displayBlock rather than a Value snapshot");
@@ -354,15 +340,15 @@ Value Description::property(const std::string &name, Limits limits) const {
     }
     if (name == "kind") {
         std::string kind = "Object";
-        if (className == "MAClassDescription")
+        if (detail::descriptionIs(*this, "MAClassDescription"))
             kind = "Class";
-        else if (className == "MASymbolDescription")
+        else if (detail::descriptionIs(*this, "MASymbolDescription"))
             kind = "Symbol";
-        else if (className == "MANumberDescription")
+        else if (detail::descriptionIs(*this, "MANumberDescription"))
             kind = "Number";
-        else if (className == "MABooleanDescription")
+        else if (detail::descriptionIs(*this, "MABooleanDescription"))
             kind = "Boolean";
-        else if (className == "MATokenDescription")
+        else if (detail::descriptionIs(*this, "MATokenDescription"))
             kind = "Array";
         else if (isMultiple())
             kind = "Collection";
@@ -413,7 +399,7 @@ std::int64_t Description::priority() const {
 std::vector<std::shared_ptr<Description>> Description::orderedChildren() const {
     auto result = children;
     for (const auto& child : result) require(bool(child), "Null description");
-    if (className == "MAPriorityContainer")
+    if (detail::descriptionIs(*this, "MAPriorityContainer"))
         std::stable_sort(result.begin(), result.end(), [](const auto &a, const auto &b) {
             return detail::compareNumbers(a->priorityValue(), b->priorityValue()) < 0;
         });
@@ -547,7 +533,7 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
         if (!kind) error("MAKindError");
     }
     if (!kind) return errors;
-    if (d.className == "MANumberDescription") {
+    if (detail::descriptionIs(d, "MANumberDescription")) {
         auto min = d.property("min"), max = d.property("max");
         if ((!min.isNil() && detail::compareNumbers(v, min) < 0) || (!max.isNil() && detail::compareNumbers(v, max) > 0)) error("MARangeError");
     }
@@ -626,6 +612,9 @@ Graph Graph::decode(const std::string& input, Limits l) {
         for (const auto& n : j.at("descriptions")) {
             auto d = std::make_shared<Description>();
             d->id = identity(n.at("id")); d->className = string(n.at("class"));
+            const auto implementation = detail::descriptionImplementation(*d);
+            require(g.format == "magritte.graph/4" || implementation == d->className,
+                    "Registered description subclasses require graph/4");
             auto shape = n; if (g.format >= "magritte.graph/3") shape.erase("conditions");
             if (n.contains("definingContext")) {
                 require(g.format == "magritte.graph/4", "Defining context requires graph/4");
@@ -648,9 +637,9 @@ Graph Graph::decode(const std::string& input, Limits l) {
             if (d->isContainer()) keys(shape, {"id", "class", "properties", "children"});
             else if (d->isRelation()) keys(shape, {"id", "class", "properties", "accessor", "reference", "classes"});
             else if (d->isOption()) keys(shape, {"id", "class", "properties", "accessor", "reference", "options", "labels"});
-            else if (d->className == "MATokenDescription") keys(shape, {"id", "class", "properties", "accessor", "reference"});
+            else if (detail::descriptionIs(*d, "MATokenDescription")) keys(shape, {"id", "class", "properties", "accessor", "reference"});
             else keys(shape, {"id", "class", "properties", "accessor"});
-            require(g.format == "magritte.graph/4" || d->className != "MAClassDescription", "Class descriptions require graph/4");
+            require(g.format == "magritte.graph/4" || !detail::descriptionIs(*d, "MAClassDescription"), "Class descriptions require graph/4");
             require(g.format != "magritte.graph/1" || !d->isReference(), "Reference descriptions require graph/2");
             require(n.at("properties").is_object(), "Expected properties dictionary");
             for (auto it = n.at("properties").begin(); it != n.at("properties").end(); ++it) {
@@ -669,7 +658,7 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 require(n.at("conditions").is_array(),"Expected conditions list");
                 for(const auto& c:n.at("conditions")){ keys(c,{"label","predicate"});d->portableConditions.push_back({string(c.at("label")),predicateValue(c.at("predicate"),l)}); }
             } else {
-                require(d->className != "MATokenDescription" && d->className != "MASymbolDescription" && d->className != "MAMemoDescription" && d->className != "MAPasswordDescription", "Description requires graph/3");
+                require(!detail::descriptionIs(*d, "MATokenDescription") && !detail::descriptionIs(*d, "MASymbolDescription") && !detail::descriptionIs(*d, "MAMemoDescription") && !detail::descriptionIs(*d, "MAPasswordDescription"), "Description requires graph/3");
                 for (const auto &prop : d->properties)
                     require(
                         prop.first != "separators" && prop.first != "thousandsSeparator" &&

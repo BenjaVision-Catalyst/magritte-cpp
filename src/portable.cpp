@@ -426,12 +426,11 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
     auto undef = propText(d, "undefined");
     if (initial && (input.empty() || (!undef.empty() && input.rfind(undef, 0) == 0)))
         return {};
-    if (d.className == "MASymbolDescription")
+    if (detail::descriptionIs(d, "MASymbolDescription"))
         return Value(Value::Symbol{input});
-    if (d.className == "MAStringDescription" || d.className == "MAMemoDescription" ||
-        d.className == "MAPasswordDescription")
+    if (detail::descriptionIs(d, "MAStringDescription"))
         return Value(input);
-    if (d.className == "MABooleanDescription") {
+    if (detail::descriptionIs(d, "MABooleanDescription")) {
         auto lower = [](std::string s) {
             for (auto &c : s) {
                 need(static_cast<unsigned char>(c) < 128, "Non-ASCII Boolean alias comparison unsupported");
@@ -454,7 +453,7 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
         }
         throw Error("MAReadError: Boolean text");
     }
-    if (d.className == "MANumberDescription") {
+    if (detail::descriptionIs(d, "MANumberDescription")) {
         auto separator = d.property("thousandsSeparator");
         auto sep = std::get<Value::Character>(separator.data).utf8;
         std::string s = input;
@@ -502,7 +501,7 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
         need(r.ec == std::errc{} && std::isfinite(n), "MAReadError: float outside finite binary64");
         return Value(n);
     }
-    if (d.className == "MASingleOptionDescription") {
+    if (detail::descriptionIs(d, "MASingleOptionDescription")) {
         const Value *matched = nullptr;
         for (const auto &label : d.labels) {
             w.tick(depth, label.second.size() + 1);
@@ -515,9 +514,9 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
             return *matched;
         return read(*d.referenceDescription(), input, w, depth + 1, false);
     }
-    if (d.className == "MATokenDescription" || d.className == "MAMultipleOptionDescription") {
+    if (detail::descriptionIs(d, "MATokenDescription") || detail::descriptionIs(d, "MAMultipleOptionDescription")) {
         Value::Array result;
-        if (d.className == "MATokenDescription") {
+        if (detail::descriptionIs(d, "MATokenDescription")) {
             auto separators = Value(propText(d, "separators")).elements();
             std::string token;
             for (const auto &c : Value(input).elements()) {
@@ -576,14 +575,14 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
     else if (d.isContainer()) {
         need(g, "Container writer requires graph resolver");
         result = writeModel(d, g->resolve(v), g, w, depth + 1);
-    } else if (d.className == "MAClassDescription") {
+    } else if (detail::descriptionIs(d, "MAClassDescription")) {
         auto cls = std::get_if<Value::Class>(&v.data);
         need(cls && detail::knownClass(cls->name), "Class writer requires a portable Class");
         result = d.displayStringFor(v, g, w.l);
-    } else if (d.className == "MABooleanDescription") {
+    } else if (detail::descriptionIs(d, "MABooleanDescription")) {
         need(v.data.index() == 1, "Boolean writer requires Boolean");
         result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
-    } else if (d.className == "MASingleOptionDescription") {
+    } else if (detail::descriptionIs(d, "MASingleOptionDescription")) {
         bool found = false;
         for (const auto &label : d.labels) {
             w.tick(depth);
@@ -597,16 +596,16 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
         }
         if (!found)
             result = d.displayStringFor(v, g, w.l);
-    } else if (d.className == "MATokenDescription" || d.isMultiple()) {
+    } else if (detail::descriptionIs(d, "MATokenDescription") || d.isMultiple()) {
         need(v.isCollection(), "Collection writer requires collection");
         need(v.collectionSize() <= w.l.visits - w.n, "Writer collection work limit");
         std::string sep = ", ";
-        if (d.className == "MATokenDescription" && v.collectionSize() > 1) {
+        if (detail::descriptionIs(d, "MATokenDescription") && v.collectionSize() > 1) {
             auto chars = Value(propText(d, "separators")).elements();
             need(!chars.empty(), "Token writer requires separator");
             sep = std::get<Value::Character>(chars.front().data).utf8;
         }
-        if (d.className == "MAMultipleOptionDescription" && v.collectionSize() == 0)
+        if (detail::descriptionIs(d, "MAMultipleOptionDescription") && v.collectionSize() == 0)
             result = propText(d, "undefined");
         else {
             bool first = true;
@@ -620,7 +619,7 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
                     result += write(one, e, g, w, depth + 1, false);
                 } else
                     result += write(*d.referenceDescription(), e, g, w, depth + 1,
-                                    d.className != "MATokenDescription");
+                                    !detail::descriptionIs(d, "MATokenDescription"));
                 need(result.size() <= w.l.bytes, "String output byte limit");
             }
         }
@@ -997,12 +996,12 @@ std::string writeString(const Description &d, const Model &m, const Graph *g, Li
 
 namespace magritte {
 std::string Description::obfuscated(const Value &v, Limits l) const {
-    if (className != "MAPasswordDescription")
+    if (!detail::descriptionIs(*this, "MAPasswordDescription"))
         throw Error("Obfuscation requires password description");
     return std::string(Value(writeString(*this, v, nullptr, l)).collectionSize(), '*');
 }
 bool Description::isObfuscated(const Value &v) const {
-    if (className != "MAPasswordDescription")
+    if (!detail::descriptionIs(*this, "MAPasswordDescription"))
         throw Error("Obfuscation requires password description");
     auto s = std::get_if<std::string>(&v.data);
     auto symbol = std::get_if<Value::Symbol>(&v.data);

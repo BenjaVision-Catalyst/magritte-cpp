@@ -5,6 +5,8 @@ std::shared_ptr<Description> referenceTarget(const Description &);
 Value undefinedIfNil(const Description &, Value);
 bool knownClass(const std::string&);
 bool shouldWrite(const Description&, const Value&, const Value&, Limits, std::size_t&);
+bool descriptionIs(const Description &, const std::string &ancestor);
+std::string descriptionImplementation(const Description &);
 std::string descriptionType(const Description&);
 bool metadataSelector(const Description&, const std::string&, bool writing);
 void checkDescription(const Description&);
