@@ -422,6 +422,48 @@ DescriptionCopy asContainer(std::shared_ptr<Description>, const std::string& new
 DescriptionCopy concatenate(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
 DescriptionCopy unionDescriptions(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
 DescriptionCopy intersectDescriptions(std::shared_ptr<Description>, std::shared_ptr<Description>, const std::string& newId, Limits = {});
+// Direct MAContainer enumeration. Native indices are zero-based. Callbacks must not
+// structurally mutate the container during an operation. Returned children retain identity.
+std::vector<std::shared_ptr<Description>> enumerationChildren(const Description &, Limits = {});
+std::shared_ptr<Description> childAt(const Description &, std::size_t index, Limits = {});
+std::shared_ptr<Description> childAt(const Description &, std::size_t index,
+                                     const std::function<std::shared_ptr<Description>()> &ifAbsent,
+                                     Limits = {});
+bool includesDescription(const Description &, const Description &, Limits = {});
+using DescriptionPredicate = std::function<bool(const Description &)>;
+std::shared_ptr<Description> detectDescription(const Description &, const DescriptionPredicate &,
+                                               Limits = {});
+std::shared_ptr<Description>
+detectDescription(const Description &, const DescriptionPredicate &,
+                  const std::function<std::shared_ptr<Description>()> &ifNone, Limits = {});
+bool allDescriptionsSatisfy(const Description &, const DescriptionPredicate &, Limits = {});
+bool anyDescriptionSatisfies(const Description &, const DescriptionPredicate &, Limits = {});
+bool noDescriptionSatisfies(const Description &, const DescriptionPredicate &, Limits = {});
+void forEachDescription(const Description &,
+                        const std::function<void(const std::shared_ptr<Description> &)> &,
+                        Limits = {});
+void forEachDescriptionIndexed(
+    const Description &,
+    const std::function<void(std::size_t, const std::shared_ptr<Description> &)> &, Limits = {});
+void forEachDescriptionSeparated(const Description &,
+                                 const std::function<void(const std::shared_ptr<Description> &)> &,
+                                 const std::function<void()> &separator, Limits = {});
+template <class Accumulator, class F>
+Accumulator reduceDescriptions(const Description &d, Accumulator initial, F combine,
+                               Limits limits = {}) {
+    for (const auto &child : enumerationChildren(d, limits))
+        initial = combine(std::move(initial), child);
+    return initial;
+}
+template <class T, class F>
+void forEachDescriptionPaired(const Description &d, const std::vector<T> &other, F body,
+                              Limits limits = {}) {
+    auto children = enumerationChildren(d, limits);
+    if (children.size() != other.size())
+        throw Error("Container paired enumeration size mismatch");
+    for (std::size_t i = 0; i < children.size(); ++i)
+        body(children[i], other[i]);
+}
 DescriptionCopy selectDescriptions(std::shared_ptr<Description>, const std::function<bool(const Description&)>&, const std::string& newId, Limits = {});
 DescriptionCopy copyWithout(std::shared_ptr<Description>, const Description&, const std::string& newId, Limits = {});
 DescriptionCopy copyWithoutAll(std::shared_ptr<Description>, const std::vector<std::shared_ptr<Description>>&, const std::string& newId, Limits = {});

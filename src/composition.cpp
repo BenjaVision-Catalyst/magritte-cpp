@@ -145,6 +145,13 @@ bool descriptionEqual(const Description &a, const Description &b, Limits l) {
     Work work{l};
     return work.equal(a, b);
 }
+bool includesDescription(const Description &container, const Description &sought, Limits limits) {
+    Work work{limits};
+    for (const auto &child : enumerationChildren(container, limits))
+        if (work.equal(*child, sought))
+            return true;
+    return false;
+}
 DescriptionCopy copyDescription(std::shared_ptr<Description> d, const std::string &id, Limits l) {
     return copy(d, id, l);
 }

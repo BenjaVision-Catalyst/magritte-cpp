@@ -1,6 +1,6 @@
 # Magritte C++
 
-A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.13 adds Magritte accessor-derived names and labels; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
+A standalone C++17 port of [Magritte](https://github.com/magritte-metamodel/magritte). **0.14 adds Magritte container lookup and enumeration; it is not a complete Magritte implementation.** No engine, UI, networking or application-framework dependency.
 
 It includes Magritte containers, a String/Symbol/Boolean/Int64/binary64 scalar subset, runtime adaptive objects, native accessors, to-one/to-many/scalar relations, static options, typed collections, cyclic object references, validation, a self-description bootstrap and bounded graph/value interchange. Loaded descriptions govern generic objects and can change at runtime without compiling new structs. Unsupported semantics fail explicitly.
 
@@ -72,3 +72,5 @@ The 0.11 phase adds `Accessor.canRead`/`canWrite`, explicit host selector/variab
 The 0.12 phase adds local `MAPluggableAccessor` block slots, block-identity equality, shallow copying and chain/memento integration. See [pluggable-accessors.md](docs/pluggable-accessors.md) for APIs, GT evidence, ownership and explicit closure interchange boundaries.
 
 The 0.13 phase implements accessor-derived names/default labels, explicit nil/empty overrides, faithful lazy null defaults and metadata integration. Swift property reads now require `try`. See [accessor-inference.md](docs/accessor-inference.md) for APIs, GT evidence, bounds and the remaining Unicode inflection boundary.
+
+Container query and enumeration APIs, GT traces and remaining boundaries are documented in [container-enumeration.md](docs/container-enumeration.md).
