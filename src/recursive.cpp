@@ -112,7 +112,7 @@ Graph objectMetadata(const std::string &cls) {
     g.descriptions.emplace(root->id, root);
     return g;
 }
-Graph reflected(const Description &target, Limits limits) {
+Graph reflected(const Description &target, Limits limits, bool completeRegistry = false) {
     auto g = expanded(target, limits);
     g.format = "magritte.graph/4";
     for (auto &p : g.descriptions)
@@ -145,7 +145,9 @@ Graph reflected(const Description &target, Limits limits) {
         d->properties["default"] = Value(Value::Collection{"set", {}});
         d->referenceDescription()->className = "MAClassDescription";
         for (const auto &name : portableClasses())
-            d->options.push_back(Value(Value::Class{name}));
+            if (completeRegistry || (name != "MAMemento" && name != "MAStraightMemento" &&
+                                     name != "MACachedMemento" && name != "MACheckedMemento"))
+                d->options.push_back(Value(Value::Class{name}));
     }
     return g;
 }
@@ -168,7 +170,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
     Graph graph;
     Limits limits;
     std::size_t generation = 0;
-    std::set<std::string> metaIds;
+    std::set<std::string> metaIds, modelSchemaIds;
+    std::map<std::string, std::shared_ptr<Memento>> mementos;
     std::map<std::string, std::shared_ptr<AccessorObject>> accessors;
     std::map<std::string, std::shared_ptr<ConditionObject>> conditions;
     struct Binding : Model {
@@ -481,7 +484,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         for (const auto &p : pending)
             if (!accessors.count(p.first))
                 ++added;
-        if (graph.descriptions.size() + accessors.size() + conditions.size() + added > limits.nodes)
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() + added >
+            limits.nodes)
             throw Error("Reflection node limit");
         for (const auto &p : pending) {
             accessors.emplace(p);
@@ -501,13 +505,84 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             (conditions.count(target->id) && conditions.at(target->id) != target))
             throw Error("Reflection identity collision");
         if (!conditions.count(target->id) &&
-            graph.descriptions.size() + accessors.size() + conditions.size() >= limits.nodes)
+            graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() >=
+                limits.nodes)
             throw Error("Reflection node limit");
         conditions.emplace(target->id, target);
         if (!graph.nativeObjects.count(target->id))
             graph.nativeObjects.emplace(target->id,
                                         std::make_shared<ConditionBinding>(shared_from_this(), target));
         return graph.nativeObjects.at(target->id);
+    }
+    std::shared_ptr<Model> bindMemento(const std::string &id, std::shared_ptr<Memento> target) {
+        checkId(id);
+        if (!target)
+            throw Error("Null memento target");
+        if (graph.nativeObjects.count(id)) {
+            if (mementos.count(id) && mementos.at(id) == target)
+                return target;
+            throw Error("Reflection identity collision");
+        }
+        for (const auto &p : mementos)
+            if (p.second == target)
+                throw Error("Memento already has a session identity");
+        std::set<std::string> added;
+        visit(
+            *target->description(),
+            [&](const Description &d) {
+                if (d.id == id)
+                    throw Error("Memento identity collides with its description");
+                if (!graph.descriptions.count(d.id))
+                    added.insert(d.id);
+            },
+            limits);
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() +
+                added.size() + 1 >
+            limits.nodes)
+            throw Error("Memento node limit");
+        bind(target->description());
+        mementos.emplace(id, target);
+        graph.nativeObjects.emplace(id, target);
+        return target;
+    }
+    Graph bootstrap(std::shared_ptr<Description> target) {
+        bind(target); // A valid input can remain bound on a failed batch; no schema is published.
+        std::vector<std::shared_ptr<Description>> targets;
+        visit(*target, [&](const Description &d) { targets.push_back(graph.descriptions.at(d.id)); }, limits);
+        Graph batch;
+        batch.format = "magritte.graph/4";
+        std::size_t nextGeneration = generation;
+        std::vector<std::shared_ptr<Description>> roots;
+        for (const auto &d : targets) {
+            auto next = reflected(*d, limits, true);
+            auto old = next.root;
+            auto prefix = "bootstrap." + std::to_string(++nextGeneration) + "." + d->id;
+            auto root = next.descriptions.at(old);
+            roots.push_back(root);
+            if (batch.root.empty())
+                batch.root = prefix;
+            for (auto &p : next.descriptions) {
+                p.second->id = prefix + p.first.substr(old.size());
+                checkId(p.second->id);
+                if (graph.nativeObjects.count(p.second->id) ||
+                    !batch.descriptions.emplace(p.second->id, p.second).second)
+                    throw Error("Bootstrap identity collision");
+            }
+            if (graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() +
+                    batch.descriptions.size() >
+                limits.nodes)
+                throw Error("Bootstrap node limit");
+        }
+        // Validate the entire staged batch before any new binding becomes visible.
+        (void)batch.encode(limits);
+        for (const auto &root : roots)
+            bind(root);
+        for (const auto &p : batch.descriptions)
+            metaIds.insert(p.first);
+        generation = nextGeneration;
+        graph.root = batch.root;
+        graph.format = batch.format;
+        return batch;
     }
     std::shared_ptr<Description> publish(Graph next, const std::string &targetId, const std::string &family) {
         auto root = next.descriptions.at(next.root);
@@ -518,7 +593,9 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             p.second->id = prefix + p.first.substr(old.size());
             renamed.emplace(p.second->id, p.second);
         }
-        if (graph.descriptions.size() + accessors.size() + conditions.size() + renamed.size() > limits.nodes)
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() +
+                renamed.size() >
+            limits.nodes)
             throw Error("Recursive metadata node limit");
         for (const auto &p : renamed)
             if (graph.nativeObjects.count(p.first))
@@ -563,7 +640,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         for (const auto &p : pending)
             if (!graph.descriptions.count(p.first))
                 ++added;
-        if (graph.descriptions.size() + accessors.size() + conditions.size() + added > limits.nodes)
+        if (graph.descriptions.size() + accessors.size() + conditions.size() + mementos.size() + added >
+            limits.nodes)
             throw Error("Recursive metadata node limit");
         for (const auto &p : pending) {
             graph.descriptions.emplace(p);
@@ -606,8 +684,64 @@ Graph RecursiveDescriptionModel::schemas() const {
     Graph result;
     result.format = state_->graph.format;
     result.root = state_->graph.root;
+    std::set<const Description *> seen, active, composed;
+    std::size_t work = 0;
+    auto tick = [&](std::size_t depth) {
+        if (++work > state_->limits.visits || depth > state_->limits.depth)
+            throw Error("Schema traversal limit");
+    };
+    std::function<void(std::shared_ptr<Description>, std::size_t)> composition = [&](auto d, auto depth) {
+        tick(depth);
+        if (active.count(d.get()))
+            throw Error("Cyclic schema composition");
+        if (composed.count(d.get()))
+            return;
+        active.insert(d.get());
+        for (const auto &c : d->orderedChildren())
+            composition(c, depth + 1);
+        active.erase(d.get());
+        composed.insert(d.get());
+    };
+    std::function<void(std::shared_ptr<Description>, std::size_t)> include = [&](auto d, auto depth) {
+        tick(depth);
+        if (!seen.insert(d.get()).second)
+            return;
+        composition(d, 0);
+        state_->checkId(d->id);
+        if (result.descriptions.count(d->id) && result.descriptions.at(d->id) != d)
+            throw Error("Schema identity collision");
+        result.descriptions[d->id] = d;
+        if (result.descriptions.size() > state_->limits.nodes)
+            throw Error("Schema node limit");
+        for (const auto &c : d->orderedChildren())
+            include(c, depth + 1);
+        if (d->isReference())
+            include(d->referenceDescription(), depth + 1);
+    };
     for (const auto &id : state_->metaIds)
-        result.descriptions.emplace(id, state_->graph.descriptions.at(id));
+        include(state_->graph.descriptions.at(id), 0);
+    for (const auto &id : state_->modelSchemaIds)
+        include(state_->graph.descriptions.at(id), 0);
     return result;
+}
+std::shared_ptr<Model> RecursiveDescriptionModel::bind(const std::string &id,
+                                                       std::shared_ptr<Memento> target) {
+    return state_->bindMemento(id, std::move(target));
+}
+std::shared_ptr<Description> RecursiveDescriptionModel::describe(const std::string &id,
+                                                                 std::shared_ptr<Memento> target) {
+    state_->bindMemento(id, target);
+    auto d = target->description();
+    state_->modelSchemaIds.insert(d->id);
+    state_->graph.root = d->id;
+    state_->graph.format = "magritte.graph/4";
+    return d;
+}
+Graph RecursiveDescriptionModel::bootstrap(std::shared_ptr<Description> target) {
+    return state_->bootstrap(std::move(target));
+}
+Graph RecursiveDescriptionModel::bootstrap(const std::string &id, std::shared_ptr<Memento> target) {
+    state_->bindMemento(id, target);
+    return state_->bootstrap(target->description());
 }
 } // namespace magritte

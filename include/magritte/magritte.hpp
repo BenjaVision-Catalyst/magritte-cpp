@@ -181,6 +181,8 @@ protected:
     std::vector<std::shared_ptr<Description>> fields() const;
 public:
     Memento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    virtual std::string className() const { return "MAMemento"; }
+    bool kindOf(const std::string&) const override;
     Model& model() const { return model_; }
     const std::shared_ptr<Description>& description() const { return description_; }
     bool usesStoredContainerValues() const override { return true; }
@@ -191,6 +193,7 @@ public:
 class StraightMemento final : public Memento {
 public:
     using Memento::Memento;
+    std::string className() const override { return "MAStraightMemento"; }
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;
     void reset() override {}
@@ -210,6 +213,7 @@ protected:
     virtual bool shouldPush(const Entry&, const Value& current, std::size_t& work) const;
 public:
     CachedMemento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    std::string className() const override { return "MACachedMemento"; }
     Values cache() const;
     bool hasChanges() const;
     Value readUsing(const Description&) const override;
@@ -222,6 +226,7 @@ class CheckedMemento final : public CachedMemento {
     bool shouldPush(const Entry&, const Value& current, std::size_t& work) const override;
 public:
     CheckedMemento(Model&, std::shared_ptr<Description>, const Graph* = nullptr, Limits = {});
+    std::string className() const override { return "MACheckedMemento"; }
     const Values& original() const { return original_; }
     bool hasModelChangedElsewhere() const;
     bool hasConflict() const;
@@ -279,6 +284,12 @@ public:
     std::shared_ptr<Model> bind(std::shared_ptr<ConditionObject>);
     std::shared_ptr<Description> describe(std::shared_ptr<AccessorObject>);
     std::shared_ptr<Description> describe(std::shared_ptr<ConditionObject>);
+    // A memento's self-description is its represented model's exact description.
+    std::shared_ptr<Model> bind(const std::string& id, std::shared_ptr<Memento>);
+    std::shared_ptr<Description> describe(const std::string& id, std::shared_ptr<Memento>);
+    // One finite batch over the input's reachable descriptions, not infinite meta-recursion.
+    Graph bootstrap(std::shared_ptr<Description>);
+    Graph bootstrap(const std::string& id, std::shared_ptr<Memento>);
     Graph schemas() const;
 };
 // MAStringReader/MAStringWriter; these do not validate values or apply defaults.
