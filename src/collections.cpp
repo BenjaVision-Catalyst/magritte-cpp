@@ -118,7 +118,7 @@ bool Description::isMultiple() const { return className == "MAToManyRelationDesc
 std::shared_ptr<Description> Description::referenceDescription() const {
     auto r = reference.lock(); if (!r) throw Error("Reference description is unavailable; retain it in the graph"); return r;
 }
-std::string Description::labelForOption(const Value& v, Limits l) const {
+std::string Description::labelForOption(const Value &v, Limits l, const Graph *graph) const {
     std::size_t work = 0; auto key = detail::valueKey(v, l, work);
     auto bounded = [&](const std::string& text) {
         if (text.size() > l.bytes || work > l.visits || text.size() > l.visits - work) throw Error("Option label output limit");
@@ -133,9 +133,9 @@ std::string Description::labelForOption(const Value& v, Limits l) const {
         if (!detail::portableLabelKey(label.first)) throw Error("Identity-sensitive option label key is not portable");
         if (label.first.data.index() == v.data.index() && detail::valueKey(label.first, l, work) == key) return bounded(label.second);
     }
-    return bounded(detail::displayString(v));
+    return bounded(displayStringFor(v, graph, l));
 }
-Options Description::allOptionsWith(const Value& current, Limits l) const {
+Options Description::allOptionsWith(const Value &current, Limits l, const Graph *graph) const {
     if (className == "MABooleanDescription") { if(l.visits<2||l.items<2)throw Error("Boolean option item/work limit");return {Value(false),Value(true)}; }
     if (!isOption()) throw Error("Option operation requires option description");
     if (options.isDynamic()) {
@@ -157,26 +157,34 @@ Options Description::allOptionsWith(const Value& current, Limits l) const {
     if (flag("extensible") && !current.isNil() && !contains) result.push_back(current);
     if (flag("sorted")) {
         auto ref = referenceDescription();
-        auto sortKey = [&](const Value& v) {
-            auto key = writeString(*ref, v, nullptr, l);
+        auto sortKey = [&](const Value &v) {
+            auto key = writeString(*ref, v, graph, l);
             for (auto& c : key) {
-                if (static_cast<unsigned char>(c) > 127) throw Error("Non-ASCII case-insensitive option sorting is not implemented");
-                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+                if (static_cast<unsigned char>(c) > 127)
+                    throw Error("Non-ASCII case-insensitive option sorting is not implemented");
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c - 'A' + 'a');
             }
             return key;
         };
-        // Check every key even for a singleton so unsupported rendering cannot hide.
-        std::vector<std::pair<std::string, Value>> ranked;
-        for (const auto& v : result) ranked.emplace_back(sortKey(v), v);
-        std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        result.clear(); for (const auto& item : ranked) result.push_back(item.second);
+        // Rendering is part of each comparison; an empty/singleton sort sends no messages.
+        std::stable_sort(result.begin(), result.end(), [&](const Value &a, const Value &b) {
+            auto left = sortKey(a), right = sortKey(b);
+            if (work >= l.visits || left.size() > l.visits - work - 1)
+                throw Error("Option sorting work limit");
+            work += 1 + left.size();
+            if (right.size() > l.visits - work)
+                throw Error("Option sorting work limit");
+            work += right.size();
+            return left < right;
+        });
     }
     if (!isMultiple() && !flag("required")) result.insert(result.begin(), property("undefinedValue"));
     return result;
 }
-Options Description::allOptions(Limits l) const {
+Options Description::allOptions(Limits l, const Graph *graph) const {
     if (isOption() && options.isDynamic()) return options.provider();
-    return allOptionsWith({}, l);
+    return allOptionsWith({}, l, graph);
 }
 bool NativeModel::kindOf(const std::string& name) const { auto& registry=ClassRegistry::global();
     bool registered=std::any_of(classes_.begin(),classes_.end(),[&](const auto& cls){return registry.find(cls).has_value();});

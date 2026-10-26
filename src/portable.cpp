@@ -560,12 +560,10 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
     else if (d.isContainer()) {
         need(g, "Container writer requires graph resolver");
         result = writeModel(d, g->resolve(v), g, w, depth + 1);
-    } else if (v.conflict() && d.className != "MABooleanDescription" && !d.isReference()) {
-        result = v.conflict()->string();
     } else if (d.className == "MAClassDescription") {
         auto cls = std::get_if<Value::Class>(&v.data);
         need(cls && detail::knownClass(cls->name), "Class writer requires a portable Class");
-        result = cls->name;
+        result = d.displayStringFor(v, g, w.l);
     } else if (d.className == "MABooleanDescription") {
         need(v.data.index() == 1, "Boolean writer requires Boolean");
         result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
@@ -582,7 +580,7 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
             }
         }
         if (!found)
-            result = detail::displayString(v);
+            result = d.displayStringFor(v, g, w.l);
     } else if (d.className == "MATokenDescription" || d.isMultiple()) {
         need(v.isCollection(), "Collection writer requires collection");
         need(v.collectionSize() <= w.l.visits - w.n, "Writer collection work limit");
@@ -612,25 +610,8 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
         }
     } else if (d.isRelation())
         result = write(*d.referenceDescription(), v, g, w, depth + 1, true);
-    else if (v.isNil())
-        result = "nil";
-    else if (auto s = std::get_if<std::string>(&v.data))
-        result = *s;
-    else if (auto s = std::get_if<Value::Symbol>(&v.data))
-        result = s->utf8;
-    else if (auto c = std::get_if<Value::Character>(&v.data))
-        result = c->utf8;
-    else if (v.data.index() == 12)
-        result = detail::displayString(v);
-    else if (auto i = std::get_if<std::int64_t>(&v.data))
-        result = std::to_string(*i);
-    else if (auto n = std::get_if<double>(&v.data))
-        result = detail::floatText(*n);
-    else if(auto cls=std::get_if<Value::Class>(&v.data))result=cls->name;
-    else if (auto b = std::get_if<bool>(&v.data))
-        result = *b ? "true" : "false";
     else
-        throw Error("Unsupported display string");
+        result = d.displayStringFor(v, g, w.l);
     w.tick(depth, result.size());
     need(result.size() <= w.l.bytes, "String output byte limit");
     return result;

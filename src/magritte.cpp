@@ -266,6 +266,9 @@ void supported(const Description &d) {
                     "Expected thousands separator character");
         } else if (k == "lineCount")
             require(d.className == "MAMemoDescription" && v.data.index() == 2, "Expected memo line count");
+        else if (k == "displayBlockOrSymbol")
+            require(v.isNil() || v.data.index() == 8,
+                    "Display must be Symbol or nil; use displayBlock for local callbacks");
         else if (k == "priority")
             require(detail::isNumber(v), "Expected numeric priority");
         else if (k == "min" || k == "max") {
@@ -319,6 +322,8 @@ Value lookup(const std::map<std::string, Value>& m, const std::string& key) {
 namespace detail { void checkDescription(const Description& d) { supported(d); } }
 bool Description::isContainer() const { return className == "MAContainer" || className == "MAPriorityContainer"; }
 Value Description::property(const std::string &name, Limits limits) const {
+    if (name == "displayBlockOrSymbol" && displayBlock)
+        throw Error("Display block is local; inspect displayBlock rather than a Value snapshot");
     auto it = properties.find(name);
     if (it != properties.end()) {
         if (name == "label" || name == "name")
@@ -343,6 +348,8 @@ Value Description::property(const std::string &name, Limits limits) const {
             kind = "String";
         return Value(Value::Class{kind});
     }
+    if (name == "displayBlockOrSymbol")
+        return Value(Value::Symbol{"greaseString"});
     if(name=="stringReader")return Value(Value::Class{"MAStringReader"});
     if(name=="stringWriter")return Value(Value::Class{"MAStringWriter"});
     if(name=="validator")return Value(Value::Class{"MAValidatorVisitor"});
@@ -622,7 +629,13 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 for(const auto& c:n.at("conditions")){ keys(c,{"label","predicate"});d->portableConditions.push_back({string(c.at("label")),predicateValue(c.at("predicate"),l)}); }
             } else {
                 require(d->className != "MATokenDescription" && d->className != "MASymbolDescription" && d->className != "MAMemoDescription" && d->className != "MAPasswordDescription", "Description requires graph/3");
-                for(const auto& prop:d->properties) require(prop.first != "separators" && prop.first != "thousandsSeparator" && prop.first != "lineCount" && prop.first != "trueString" && prop.first != "falseString" && prop.first != "trueStrings" && prop.first != "falseStrings", "Property requires graph/3");
+                for (const auto &prop : d->properties)
+                    require(prop.first != "separators" && prop.first != "thousandsSeparator" &&
+                                prop.first != "lineCount" && prop.first != "trueString" &&
+                                prop.first != "falseString" && prop.first != "trueStrings" &&
+                                prop.first != "falseStrings" &&
+                                prop.first != "displayBlockOrSymbol",
+                            "Property requires graph/3");
             }
             require(g.descriptions.emplace(d->id, d).second, "Duplicate description identity");
         }
@@ -735,7 +748,9 @@ std::string Graph::encode(Limits l) const {
             const auto& d = *p.second; supported(d); detail::checkPortableDescription(d,l,portableWork);
             require(!d.options.isDynamic(), "Local dynamic option providers are not portable; replace with explicit static options before export");
             require(!d.accessorObject, "Live accessor identity is local; materialize an explicit snapshot before export");
-            require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction, "Local executable behavior is not portable");
+            require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction &&
+                        !d.displayBlock,
+                    "Local executable behavior is not portable");
             J n{{"id", d.id}, {"class", d.className}, {"properties", J::object()}};
             if (d.definingContext) {
                 require(format == "magritte.graph/4", "Defining context requires graph/4");

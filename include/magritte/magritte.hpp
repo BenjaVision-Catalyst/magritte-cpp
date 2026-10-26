@@ -181,8 +181,18 @@ struct Accessor {
     std::string defaultLabelFor(const Description &, Limits = {}) const;
     void check(Limits = {}) const;
 };
+struct DisplayBlock {
+    using Operation = std::function<std::string(const Value &, const Description &)>;
+    const Operation operation;
+    explicit DisplayBlock(Operation f) : operation(std::move(f)) {}
+    explicit DisplayBlock(std::function<std::string(const Value &)> f)
+        : operation([f = std::move(f)](const Value &v, const Description &) { return f(v); }) {}
+    explicit DisplayBlock(std::function<std::string()> f)
+        : operation([f = std::move(f)](const Value &, const Description &) { return f(); }) {}
+};
 struct Model {
     virtual ~Model() = default;
+    virtual Value displayMessage(const std::string &, const Description *argument = nullptr) const;
     virtual bool usesStoredContainerValues() const { return false; }
     virtual bool kindOf(const std::string& name) const { return ClassRegistry::global().includesBehavior("Object", name); }
     // Explicit host protocol discovery; queries do not execute bound methods.
@@ -218,6 +228,10 @@ struct Description : Model {
     bool kindOf(const std::string&) const override;
     std::string id, className = "MAStringDescription", key;
     std::shared_ptr<DescriptionContext> definingContext;
+    std::shared_ptr<DisplayBlock> displayBlock;
+    void display(std::string selector);
+    void display(std::shared_ptr<DisplayBlock>);
+    std::string displayStringFor(const Value &, const Graph * = nullptr, Limits = {}) const;
     std::map<std::string, Value> properties;
     std::vector<std::shared_ptr<Description>> children;
     // Graph owns descriptions. Non-owning reference edges permit recursive models.
@@ -241,9 +255,9 @@ struct Description : Model {
     bool isReference() const { return isRelation() || isOption() || className == "MATokenDescription"; }
     bool isMultiple() const;
     std::shared_ptr<Description> referenceDescription() const;
-    Options allOptions(Limits = {}) const;
-    Options allOptionsWith(const Value&, Limits = {}) const;
-    std::string labelForOption(const Value&, Limits = {}) const;
+    Options allOptions(Limits = {}, const Graph * = nullptr) const;
+    Options allOptionsWith(const Value &, Limits = {}, const Graph * = nullptr) const;
+    std::string labelForOption(const Value &, Limits = {}, const Graph * = nullptr) const;
     std::string obfuscated(const Value&, Limits = {}) const;
     bool isObfuscated(const Value&) const;
     Value property(const std::string &, Limits = {}) const;
@@ -284,6 +298,8 @@ class NativeModel : public Model {
     void* object_;
     std::vector<std::string> classes_;
 public:
+    std::map<std::string, std::function<Value(const void*, const Description*)>> displayReaders;
+    Value displayMessage(const std::string&, const Description* argument = nullptr) const override;
     Graph* resolver = nullptr;
     // Explicit host bindings, indexed by selector or variable name. No implicit reflection.
     std::map<std::string, std::function<Value(const void*)>> readers;
