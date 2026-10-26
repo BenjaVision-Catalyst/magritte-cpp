@@ -79,7 +79,8 @@ void Visitor::visitToOneRelationDescription(Description& d) { visitRelationDescr
 void Visitor::visitToManyRelationDescription(Description& d) { visitRelationDescription(d); }
 void Visitor::visitToManyScalarRelationDescription(Description& d) { visitToManyRelationDescription(d); }
 
-void DescriptionBuilder::remember(std::shared_ptr<Description> source) {
+void DescriptionBuilder::remember(std::shared_ptr<Description> source, bool refresh) {
+    std::set<const Description *> scanned;
     std::vector<std::pair<std::shared_ptr<Description>, std::size_t>> pending{{std::move(source), 0}};
     std::size_t work = 0;
     while (!pending.empty()) {
@@ -88,13 +89,18 @@ void DescriptionBuilder::remember(std::shared_ptr<Description> source) {
         if (!d) throw Error("Null builder description");
         if (++work > limits_.visits || entry.second > limits_.depth)
             throw Error("Builder ownership work/depth limit");
-        if (owners_.count(d.get())) continue;
+        if (!scanned.insert(d.get()).second)
+            continue;
+        if (owners_.count(d.get()) && !refresh)
+            continue;
         auto id = identities_.find(d->id);
         if (id != identities_.end() && id->second != d.get()) throw Error("Builder identity collision");
-        if (owners_.size() >= limits_.nodes || d->children.size() > limits_.items)
+        if ((!owners_.count(d.get()) && owners_.size() >= limits_.nodes) ||
+            d->children.size() > limits_.items)
             throw Error("Builder retained node/item limit");
-        owners_.emplace(d.get(), d); identities_.emplace(d->id, d.get());
-        result_.retained.push_back(d);
+        if (owners_.emplace(d.get(), d).second)
+            result_.retained.push_back(d);
+        identities_.emplace(d->id, d.get());
         for (const auto& child : d->children) pending.emplace_back(child, entry.second + 1);
         if (d->isReference()) pending.emplace_back(d->referenceDescription(), entry.second + 1);
     }
@@ -112,7 +118,8 @@ std::shared_ptr<Description> DescriptionBuilder::copyForBuild(std::shared_ptr<De
     return copy.root;
 }
 void DescriptionBuilder::setBuiltDescription(std::shared_ptr<Description> d) {
-    if (d) remember(d);
+    if (d)
+        remember(d, true);
     result_.root = std::move(d);
 }
 DescriptionCopy DescriptionBuilder::buildFrom(std::shared_ptr<Description> source,
@@ -120,13 +127,15 @@ DescriptionCopy DescriptionBuilder::buildFrom(std::shared_ptr<Description> sourc
     if (prefix.empty() || !std::all_of(prefix.begin(), prefix.end(), [](unsigned char c) { return c >= 33 && c <= 126; }))
         throw Error("Invalid builder identity prefix");
     remember(source);
-    prefix_ = prefix; target = targetModel;
+    prefix_ = prefix;
+    target = targetModel;
+    targetValue.reset();
     // As upstream, buildFrom does not reset an existing builtDescription.
     visit(*source);
     return result_;
 }
 void DescriptionBuilder::visitContainer(Description& d) {
-    setBuiltDescription(copyForBuild(ownedDescription(d)));
+    DescriptionBuilder::setBuiltDescription(copyForBuild(ownedDescription(d)));
     result_.root->children.clear();
     auto children = d.orderedChildren();
     if (children.size() > limits_.items) throw Error("Builder item limit");

@@ -59,6 +59,12 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
     };
     std::string result = std::to_string(v.data.index()) + ":";
     switch (v.data.index()) {
+    case 12: {
+        auto f = detail::fractionOf(v);
+        if (f.denominator == 1)
+            return "2:" + std::to_string(f.numerator);
+        return "12:" + std::to_string(f.numerator) + "/" + std::to_string(f.denominator);
+    }
     case 11:
         (void)v.conflict();
         return "11:MACompositeConflict";
@@ -76,6 +82,8 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
             throw Error("Non-finite float");
         if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 && std::trunc(n) == n)
             return "2:" + std::to_string(static_cast<std::int64_t>(n));
+        if (auto f = floatFraction(n))
+            return "12:" + std::to_string(f->numerator) + "/" + std::to_string(f->denominator);
         return result + floatBits(n);
     }
         case 10: {auto name=std::get<Value::Class>(v.data).name;if(!knownClass(name))throw Error("Unknown portable class");return result+wrap(hex(name));}

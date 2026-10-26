@@ -123,7 +123,8 @@ bool predicate(const Predicate &p, const Value &input, Work &w, std::size_t dept
         return a.compare(s == "beginsWith:" ? 0 : a.size() - b.size(), b.size(), b) == 0;
     }
     if (s == "even" || s == "odd") {
-        need(detail::isNumber(r), "Parity requires numeric receiver");
+        need(detail::isNumber(r) && r.data.index() != 12,
+             "Parity requires supported numeric receiver");
         auto even = r.data.index() == 2 ? std::get<std::int64_t>(r.data) % 2 == 0
                                         : std::fmod(std::get<double>(r.data), 2.0) == 0;
         return s == "even" ? even : !even;
@@ -619,6 +620,8 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
         result = s->utf8;
     else if (auto c = std::get_if<Value::Character>(&v.data))
         result = c->utf8;
+    else if (v.data.index() == 12)
+        result = detail::displayString(v);
     else if (auto i = std::get_if<std::int64_t>(&v.data))
         result = std::to_string(*i);
     else if (auto n = std::get_if<double>(&v.data))
@@ -652,9 +655,13 @@ bool evaluatePredicate(const Predicate &p, const Value &v, Limits l, std::size_t
     work = w.n;
     return result;
 }
-bool isNumber(const Value &v) { return v.data.index() == 2 || v.data.index() == 9; }
+bool isNumber(const Value &v) {
+    return v.data.index() == 2 || v.data.index() == 9 || v.data.index() == 12;
+}
 int compareNumbers(const Value &a, const Value &b) {
     need(isNumber(a) && isNumber(b), "Numeric comparison requires numbers");
+    if (a.data.index() == 12 || b.data.index() == 12)
+        return compareFractions(a, b);
     if (a.data.index() == 2 && b.data.index() == 2) {
         auto x = std::get<std::int64_t>(a.data), y = std::get<std::int64_t>(b.data);
         return x < y ? -1 : x > y ? 1 : 0;
@@ -703,6 +710,12 @@ double floatFromBits(const std::string &s) {
     return n;
 }
 std::string displayString(const Value &v) {
+    if (v.data.index() == 12) {
+        auto f = detail::fractionOf(v);
+        return f.denominator == 1
+                   ? std::to_string(f.numerator)
+                   : "(" + std::to_string(f.numerator) + "/" + std::to_string(f.denominator) + ")";
+    }
     if (auto c = v.conflict())
         return c->string();
     if (v.isNil())

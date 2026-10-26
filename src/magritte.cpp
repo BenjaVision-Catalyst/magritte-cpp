@@ -41,6 +41,13 @@ Value value(const J& j, Limits l, std::size_t depth = 0) {
     if (type == "nil") { keys(j, {"type"}); return {}; }
     keys(j, {"type", "value"});
     const auto& v = j.at("value");
+    if (type == "fraction") {
+        keys(v, {"numerator", "denominator"});
+        auto n = value(J{{"type", "integer"}, {"value", v.at("numerator")}}, l, depth + 1);
+        auto d = value(J{{"type", "integer"}, {"value", v.at("denominator")}}, l, depth + 1);
+        return Value(
+            Value::Fraction{std::get<std::int64_t>(n.data), std::get<std::int64_t>(d.data)});
+    }
     if (type == "string") return Value(string(v));
     if (type == "class") return Value(Value::Class{identity(v)});
     if (type == "symbol") return Value(Value::Symbol{string(v)});
@@ -76,6 +83,12 @@ Value value(const J& j, Limits l, std::size_t depth = 0) {
 J wire(const Value& v, Limits l, std::size_t depth = 0) {
     require(depth <= l.depth, "Value depth limit");
     switch (v.data.index()) {
+    case 12: {
+        auto f = detail::fractionOf(v);
+        return J{{"type", "fraction"},
+                 {"value", J{{"numerator", std::to_string(f.numerator)},
+                             {"denominator", std::to_string(f.denominator)}}}};
+    }
     case 11:
         throw Error("Composite conflicts are local objects and cannot be exported");
     case 0:
@@ -238,8 +251,9 @@ void supported(const Description &d) {
     for (const auto &p : d.properties) {
         const auto &k = p.first;
         const auto &v = p.second;
-        if (k == "required" || k == "readOnly" || k == "visible" || k == "ordered" || k == "distinct" ||
-            k == "definitive" || k == "sorted" || k == "extensible" || k == "shouldCacheDefault")
+        if (k == "canExpand" || k == "required" || k == "readOnly" || k == "visible" ||
+            k == "ordered" || k == "distinct" || k == "definitive" || k == "sorted" ||
+            k == "extensible" || k == "shouldCacheDefault")
             require(std::holds_alternative<bool>(v.data), "Expected Boolean property: " + k);
         else if (k == "separators" || k == "trueString" || k == "falseString") {
             require((k == "separators" && d.className == "MATokenDescription") ||
@@ -253,7 +267,7 @@ void supported(const Description &d) {
         } else if (k == "lineCount")
             require(d.className == "MAMemoDescription" && v.data.index() == 2, "Expected memo line count");
         else if (k == "priority")
-            require(std::holds_alternative<std::int64_t>(v.data), "Expected integer priority");
+            require(detail::isNumber(v), "Expected numeric priority");
         else if (k == "min" || k == "max") {
             require(d.className == "MANumberDescription", "Range requires number description");
             require(v.isNil() || detail::isNumber(v), "Unsupported numeric bound");
@@ -263,6 +277,12 @@ void supported(const Description &d) {
             require(v.isNil() || std::holds_alternative<std::string>(v.data), "Expected text property: " + k);
         else if (k == "stringReader" || k == "stringWriter" || k == "validator") {
             auto cls=std::get_if<Value::Class>(&v.data);require(cls && cls->name==(k=="stringReader"?"MAStringReader":k=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"), "Unsupported interpreter class override");
+        } else if (k == "descriptionBuilder")
+            require(v.isNil() || v.data.index() == 10, "Builder must be Class or nil");
+        else if (k == "descriptionBuilders") {
+            require(d.isContainer() && v.data.index() == 4, "Builders require container Array");
+            for (const auto &e : v.elements())
+                require(e.data.index() == 10, "Builder entry must be Class");
         } else if (k == "kind")
             require(v.isNil() || (v.data.index() == 10 &&
                                   detail::knownClass(std::get<Value::Class>(v.data).name)),
@@ -337,6 +357,8 @@ Value Description::property(const std::string &name, Limits limits) const {
     if (name == "visible") return Value(true);
     if (name == "required" || name == "readOnly" || name == "ordered" || name == "distinct" || name == "definitive" || name == "sorted" || name == "extensible") return Value(false);
     if (name == "shouldCacheDefault") return Value(isRelation() && isMultiple());
+    if (name == "descriptionBuilders")
+        return Value(Value::Array{});
     if (name == "priority") return Value(std::int64_t(0));
     if (name == "undefined") return Value("");
     if (name == "label") {
@@ -360,7 +382,10 @@ std::int64_t Description::priority() const {
 std::vector<std::shared_ptr<Description>> Description::orderedChildren() const {
     auto result = children;
     for (const auto& child : result) require(bool(child), "Null description");
-    if (className == "MAPriorityContainer") std::stable_sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a->priority() < b->priority(); });
+    if (className == "MAPriorityContainer")
+        std::stable_sort(result.begin(), result.end(), [](const auto &a, const auto &b) {
+            return detail::compareNumbers(a->priorityValue(), b->priorityValue()) < 0;
+        });
     return result;
 }
 Value Description::readUsing(const Description& d) const { return (d.accessor || d.accessorObject) ? d.effectiveAccessor().read(*this) : property(d.key); }
@@ -384,6 +409,8 @@ bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
     if (auto r = std::get_if<Value::Reference>(&v.data)) {
         require(graph, "Object reference validation requires a graph resolver"); return graph->resolve(*r).kindOf(kind);
     }
+    if (v.data.index() == 12)
+        return ClassRegistry::global().includesBehavior("Fraction", kind);
     static const char* types[]={"UndefinedObject","Boolean","Integer","String","Array",nullptr,"Character",nullptr,"Symbol","Float","Class"};
     auto type=types[v.data.index()];std::string collection;
     if(auto c=std::get_if<Value::Collection>(&v.data)){collection=c->kind=="ordered"?"OrderedCollection":c->kind=="set"?"Set":"Bag";type=collection.c_str();}
@@ -538,11 +565,12 @@ Graph Graph::decode(const std::string& input, Limits l) {
         require(j.at("format") == "magritte.graph/1" || j.at("format") == "magritte.graph/2" || j.at("format") == "magritte.graph/3" || j.at("format") == "magritte.graph/4", "Unsupported format");
         if(j.at("format")!="magritte.graph/4") {
             std::function<void(const J &)> legacy = [&](const J &node) {
-                if (node.is_object() && ((node.contains("type") && node.at("type").is_string() &&
-                                          node.at("type") == "class") ||
-                                         (node.contains("class") && node.at("class").is_string() &&
-                                          (node.at("class") == "MADelegatorAccessor" ||
-                                           node.at("class") == "MACompositeAccessor"))))
+                if (node.is_object() &&
+                    ((node.contains("type") && node.at("type").is_string() &&
+                      (node.at("type") == "class" || node.at("type") == "fraction")) ||
+                     (node.contains("class") && node.at("class").is_string() &&
+                      (node.at("class") == "MADelegatorAccessor" ||
+                       node.at("class") == "MACompositeAccessor"))))
                     throw Error("Class values and delegators require graph/4");
                 if (node.is_structured())
                     for (const auto &child : node)

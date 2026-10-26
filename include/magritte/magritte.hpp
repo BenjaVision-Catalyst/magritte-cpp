@@ -13,9 +13,12 @@
 #include <utility>
 
 namespace magritte {
-// Portable numbers are signed Int64 and finite IEEE-754 binary64.
+// Portable numbers are Int64, finite binary64, and normalized bounded exact fractions.
 struct CompositeConflict;
 struct Value {
+    struct Fraction {
+        std::int64_t numerator, denominator;
+    };
     struct Class { std::string name; };
     struct Reference { std::string id; bool operator==(const Reference& r) const { return id == r.id; } };
     struct Character { std::string utf8; bool operator==(const Character& c) const { return utf8 == c.utf8; } };
@@ -23,7 +26,7 @@ struct Value {
     struct Collection { std::string kind; std::vector<Value> elements; };
     using Array = std::vector<Value>;
     std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character,
-                 Collection, Symbol, double, Class, std::shared_ptr<CompositeConflict>>
+                 Collection, Symbol, double, Class, std::shared_ptr<CompositeConflict>, Fraction>
         data;
     Value() = default;
     explicit Value(bool v) : data(v) {}
@@ -37,6 +40,7 @@ struct Value {
     explicit Value(Symbol v) : data(std::move(v)) {}
     explicit Value(double v);
     explicit Value(Class v);
+    explicit Value(Fraction);
     explicit Value(std::shared_ptr<CompositeConflict>);
     std::shared_ptr<CompositeConflict> conflict() const;
     bool isCollection() const;
@@ -248,6 +252,7 @@ struct Description : Model {
     bool shouldWrite(const Value& candidate, const Value& previous, Limits = {}) const;
     bool flag(const std::string&) const;
     std::int64_t priority() const;
+    Value priorityValue() const;
     std::vector<std::shared_ptr<Description>> orderedChildren() const;
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;
@@ -418,14 +423,38 @@ public:
     virtual void visitToManyRelationDescription(Description&);
     virtual void visitToManyScalarRelationDescription(Description&);
 };
+class DescriptionBuilder;
+struct BuilderStep {
+    using Operation = std::function<DescriptionCopy(std::shared_ptr<Description>,
+                                                    const std::string &, DescriptionBuilder &)>;
+    Operation operation;
+    static BuilderStep named(const std::string &className);
+};
+struct BuilderBudget {
+    std::size_t depth = 0, work = 0;
+};
+struct BuilderEnvironment {
+    std::shared_ptr<BuilderBudget> budget;
+    Graph *graph = nullptr; // borrowed through all builder operations
+    std::function<std::shared_ptr<Description>(const Model *)> describe;
+    // Explicit platform bindings for selectors absent from upstream Magritte-Model.
+    std::function<bool(const Description &)> tabDisplay, groupExpandOnLabel;
+    std::function<void(Description &, const Accessor &)> addToAccessor;
+    std::function<std::vector<BuilderStep>(const Description &)> descriptionBuilders;
+};
+using DescriptionBuilderFactory = std::function<std::unique_ptr<DescriptionBuilder>(Limits)>;
+void registerDescriptionBuilder(const std::string &className, DescriptionBuilderFactory);
+bool canExpand(const Description &, const BuilderEnvironment & = {});
+void setDescriptionBuilders(Description &, const std::vector<std::string> &classes, Limits = {});
 // MADescriptionBuilder's stateful copy/enrichment protocol. Model pointers are borrowed.
 class DescriptionBuilder : public Visitor {
+  protected:
     DescriptionCopy result_;
     std::map<const Description*, std::shared_ptr<Description>> owners_;
     std::map<std::string, const Description*> identities_;
     std::string prefix_;
     std::size_t serial_ = 0;
-    void remember(std::shared_ptr<Description>);
+    void remember(std::shared_ptr<Description>, bool refresh = false);
     std::shared_ptr<Description> copyForBuild(std::shared_ptr<Description>);
 protected:
     std::shared_ptr<Description> ownedDescription(Description&) const;
@@ -434,12 +463,40 @@ public:
     Model* target = nullptr;
     Model* model = nullptr;
     std::int64_t priority = 0;
+    Limits builderLimits() const { return limits_; }
+    BuilderEnvironment environment;
+    std::optional<Value> targetValue;
+    Model *targetModel() const;
+    std::shared_ptr<Description> targetDescription(const Model *) const;
+    std::shared_ptr<Description> currentTargetDescription() const;
+    std::vector<BuilderStep> stepsFor(const Description &) const;
+    DescriptionCopy buildFromValue(std::shared_ptr<Description>, const std::string &prefix, Value);
     const std::shared_ptr<Description>& builtDescription() const { return result_.root; }
-    void setBuiltDescription(std::shared_ptr<Description>);
+    virtual void setBuiltDescription(std::shared_ptr<Description>);
     // New IDs use newIdPrefix.N. A suppressed visit can leave result.root null.
     DescriptionCopy buildFrom(std::shared_ptr<Description>, const std::string& newIdPrefix, Model* target = nullptr);
     void visitContainer(Description&) override;
     void visitDescription(Description&) override;
+};
+class ComposedDescriptionBuilder : public DescriptionBuilder {
+    std::size_t pipelineSerial_ = 0;
+    void compose(std::shared_ptr<Description>, const std::vector<BuilderStep> &, Model *,
+                 std::optional<Value>);
+
+  public:
+    using DescriptionBuilder::DescriptionBuilder;
+    void setBuiltDescription(std::shared_ptr<Description>) override;
+    void visitContainer(Description &) override;
+    void visitRelationDescription(Description &) override;
+};
+class DescriptionFlattener : public DescriptionBuilder {
+    std::size_t expansionDepth_ = 0, expansionWork_ = 0;
+
+  public:
+    using DescriptionBuilder::DescriptionBuilder;
+    void expandDescription(Description &, const Value &);
+    void addToBuiltDescription(Description &, const Value &);
+    void visitToOneRelationDescription(Description &) override;
 };
 DescriptionCopy copyDescription(std::shared_ptr<Description>, const std::string& newId, Limits = {});
 DescriptionCopy asContainer(std::shared_ptr<Description>, const std::string& newId, Limits = {});
