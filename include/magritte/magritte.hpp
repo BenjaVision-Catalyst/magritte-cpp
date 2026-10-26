@@ -227,7 +227,9 @@ struct Model {
     virtual bool hasVariable(const std::string &) const { return false; }
     virtual Value readSlot(const std::string& strategy, const std::string& name) const;
     virtual void writeSlot(const std::string& strategy, const std::string& name, Value);
-    virtual Value readUsing(const Description&) const = 0;
+    // Object>>readUsing: reads once, then substitutes undefinedValue only for nil.
+    // Adaptive models and mementos override this hook with their own semantics.
+    virtual Value readUsing(const Description &) const;
     // Raw model writes, like Smalltalk's write:using:, do not validate or enforce UI flags.
     virtual void writeUsing(const Description&, Value) = 0;
 };

@@ -2,6 +2,7 @@
 #include <magritte/magritte.hpp>
 namespace magritte::detail {
 std::shared_ptr<Description> referenceTarget(const Description &);
+Value undefinedIfNil(const Description &, Value);
 bool knownClass(const std::string&);
 bool shouldWrite(const Description&, const Value&, const Value&, Limits, std::size_t&);
 std::string descriptionType(const Description&);

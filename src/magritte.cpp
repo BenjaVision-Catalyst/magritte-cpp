@@ -419,15 +419,23 @@ std::vector<std::shared_ptr<Description>> Description::orderedChildren() const {
         });
     return result;
 }
-Value Description::readUsing(const Description& d) const { return (d.accessor || d.accessorObject) ? d.effectiveAccessor().read(*this) : property(d.key); }
+Value Description::readUsing(const Description &d) const {
+    auto value =
+        (d.accessor || d.accessorObject) ? d.effectiveAccessor().read(*this) : property(d.key);
+    return detail::undefinedIfNil(d, std::move(value));
+}
 void Description::writeUsing(const Description& d, Value v) { if(d.accessor || d.accessorObject)d.effectiveAccessor().write(*this,std::move(v));else properties[d.key] = std::move(v); }
 Value AdaptiveModel::readUsing(const Description& d) const { return lookup(values, d.id); }
 void AdaptiveModel::writeUsing(const Description& d, Value v) { values[d.id] = std::move(v); }
-Value DictionaryModel::readUsing(const Description& d) const { return d.effectiveAccessor().read(*this, resolver); }
+Value DictionaryModel::readUsing(const Description &d) const {
+    auto value = d.effectiveAccessor().read(*this, resolver);
+    return detail::undefinedIfNil(d, std::move(value));
+}
 void DictionaryModel::writeUsing(const Description& d, Value v) { d.effectiveAccessor().write(*this, std::move(v), resolver); }
 Value NativeModel::readUsing(const Description& d) const {
-    if (object_ && d.nativeRead) return d.nativeRead(object_);
-    return d.effectiveAccessor().read(*this, resolver);
+    auto value = (object_ && d.nativeRead) ? d.nativeRead(object_)
+                                           : d.effectiveAccessor().read(*this, resolver);
+    return detail::undefinedIfNil(d, std::move(value));
 }
 void NativeModel::writeUsing(const Description& d, Value v) {
     if (object_ && d.nativeWrite) d.nativeWrite(object_, v);

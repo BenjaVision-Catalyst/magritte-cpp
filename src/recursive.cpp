@@ -334,7 +334,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         }
         Value readUsing(const Description &d) const override {
             auto s = state();
-            auto value = d.effectiveAccessor().read(*this, &s->graph, s->limits);
+            auto value =
+                detail::undefinedIfNil(d, d.effectiveAccessor().read(*this, &s->graph, s->limits));
             (void)encodeValue(value, s->limits);
             return value;
         }
@@ -434,7 +435,8 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         }
         Value readUsing(const Description &d) const override {
             auto s = state();
-            auto v = d.effectiveAccessor().read(*this, &s->graph, s->limits);
+            auto v =
+                detail::undefinedIfNil(d, d.effectiveAccessor().read(*this, &s->graph, s->limits));
             (void)encodeValue(v, s->limits);
             return v;
         }
@@ -452,10 +454,14 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
         bool kindOf(const std::string &cls) const override {
             return ClassRegistry::global().includesBehavior(target->predicate.className, cls);
         }
-        Value readUsing(const Description &) const override {
-            if (owner.expired())
+        Value readUsing(const Description &d) const override {
+            auto s = owner.lock();
+            if (!s)
                 throw Error("Recursive metadata session expired");
-            throw Error("Upstream condition objects have no annotated fields");
+            auto value =
+                detail::undefinedIfNil(d, d.effectiveAccessor().read(*this, &s->graph, s->limits));
+            (void)encodeValue(value, s->limits);
+            return value;
         }
         void writeUsing(const Description &, Value) override {
             if (owner.expired())
