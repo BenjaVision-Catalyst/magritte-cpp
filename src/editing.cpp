@@ -157,7 +157,7 @@ Value CachedMemento::readUsing(const Description &d) const {
 }
 void CachedMemento::writeUsing(const Description &d, Value value) {
     checkIdentities();
-    (void)encodeValue(value, limits_);
+    detail::checkLocalValue(value, limits_);
     Work work{limits_};
     for (const auto &p : cache_)
         if (p.first != d.id)

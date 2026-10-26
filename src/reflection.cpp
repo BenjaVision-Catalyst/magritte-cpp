@@ -28,7 +28,7 @@ std::shared_ptr<AccessorObject> AccessorObject::fromAccessor(const std::string &
             n->value.steps.clear();
             if (a.className == "MADelegatorAccessor")
                 n->next = build(key + ".next", a.steps.at(0), depth + 1);
-            else if (a.className == "MAChainAccessor") {
+            else if ((a.className == "MAChainAccessor" || a.className == "MACompositeAccessor")) {
                 // A binary chain matches MAChainAccessor's actual accessor/next slots.
                 n->accessor = build(key + ".accessor", a.steps.at(0), depth + 1);
                 auto tail = a.steps.size() == 2 ? a.steps.at(1) : a;
@@ -52,12 +52,12 @@ Accessor AccessorObject::snapshot(Limits l) const {
         auto a = n.value;
         if (!a.steps.empty())
             throw Error("Object accessor uses slots, not inline steps");
-        if (a.className == "MAChainAccessor") {
+        if ((a.className == "MAChainAccessor" || a.className == "MACompositeAccessor")) {
             if (!n.accessor || !n.next)
                 throw Error("Chain requires accessor and next");
             a.steps.push_back(make(*n.accessor, depth + 1));
             auto tail = make(*n.next, depth + 1);
-            if (tail.className == "MAChainAccessor")
+            if (a.className == "MAChainAccessor" && tail.className == "MAChainAccessor")
                 a.steps.insert(a.steps.end(), tail.steps.begin(), tail.steps.end());
             else
                 a.steps.push_back(tail);

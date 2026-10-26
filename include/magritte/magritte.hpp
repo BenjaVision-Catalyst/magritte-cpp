@@ -14,6 +14,7 @@
 
 namespace magritte {
 // Portable numbers are signed Int64 and finite IEEE-754 binary64.
+struct CompositeConflict;
 struct Value {
     struct Class { std::string name; };
     struct Reference { std::string id; bool operator==(const Reference& r) const { return id == r.id; } };
@@ -21,7 +22,9 @@ struct Value {
     struct Symbol { std::string utf8; };
     struct Collection { std::string kind; std::vector<Value> elements; };
     using Array = std::vector<Value>;
-    std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character, Collection, Symbol, double, Class> data;
+    std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character,
+                 Collection, Symbol, double, Class, std::shared_ptr<CompositeConflict>>
+        data;
     Value() = default;
     explicit Value(bool v) : data(v) {}
     explicit Value(std::int64_t v) : data(v) {}
@@ -34,6 +37,8 @@ struct Value {
     explicit Value(Symbol v) : data(std::move(v)) {}
     explicit Value(double v);
     explicit Value(Class v);
+    explicit Value(std::shared_ptr<CompositeConflict>);
+    std::shared_ptr<CompositeConflict> conflict() const;
     bool isCollection() const;
     Array elements() const;
     std::size_t collectionSize() const;
@@ -78,6 +83,22 @@ public:
     bool includesBehavior(const std::string& className, const std::string& ancestor) const;
     bool inheritsFrom(const std::string& className, const std::string& ancestor) const;
     std::optional<std::string> commonSuperclass(const std::vector<std::string>&) const;
+};
+// A local Magritte object, not a string sentinel or serialized closure/message proxy.
+struct CompositeConflict final {
+    std::optional<std::string> kind, stringValue;
+    std::string string() const { return stringValue.value_or("(Multiple values)"); }
+    bool kindOf(const std::string &) const;
+    bool operator==(const CompositeConflict &) const { return true; }
+    std::size_t hash() const { return std::hash<std::string>{}("MACompositeConflict"); }
+    std::shared_ptr<CompositeConflict> copy() const {
+        return std::make_shared<CompositeConflict>(*this);
+    }
+    // Host class protocol discovery is explicit, like NativeModel selector bindings.
+    std::string doesNotUnderstand(
+        const std::string &selector,
+        const std::function<bool(const std::string &kind, const std::string &selector)>
+            &canUnderstand) const;
 };
 struct ValidationError {
     std::string descriptionId, code, message;
@@ -136,6 +157,8 @@ public:
 struct Accessor {
     using ReadBlock = std::function<Value(const struct Model &)>;
     using WriteBlock = std::function<void(struct Model &, const Value &)>;
+    static Accessor composite(Accessor head, Accessor next, std::optional<std::string> kind = {});
+    static Accessor compositeVia(Accessor head, Description &, Limits = {});
     static Accessor pluggable(std::shared_ptr<const ReadBlock> = {},
                               std::shared_ptr<const WriteBlock> = {});
     std::string className = "MADictionaryAccessor", name, writeName;
@@ -144,6 +167,7 @@ struct Accessor {
     // Shared callable identity preserves Magritte block equality and shallow copying.
     std::shared_ptr<const ReadBlock> readBlock;
     std::shared_ptr<const WriteBlock> writeBlock;
+    std::optional<std::string> kind; // MACompositeAccessor's unannotated class slot
     bool canRead(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     bool canWrite(const struct Model &, const Graph * = nullptr, Limits = {}) const;
     Value read(const struct Model&, const Graph* = nullptr, Limits = {}) const;

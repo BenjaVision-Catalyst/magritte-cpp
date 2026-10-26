@@ -146,6 +146,9 @@ bool predicate(const Predicate &p, const Value &input, Work &w, std::size_t dept
 }
 void checkAccessor(const Accessor &a, Work &w, std::size_t depth) {
     w.tick(depth);
+    need(a.className == "MACompositeAccessor" || !a.kind, "Unexpected accessor kind");
+    if (a.kind)
+        need(detail::knownClass(*a.kind), "Unknown composite kind");
     need(a.className == "MAPluggableAccessor" || (!a.readBlock && !a.writeBlock),
          "Blocks require a pluggable accessor");
     if (a.className == "MAPluggableAccessor") {
@@ -165,7 +168,9 @@ void checkAccessor(const Accessor &a, Work &w, std::size_t depth) {
                  "Invalid UUID byte");
     }
     if (a.className == "MADelegatorAccessor") { need(a.steps.size()==1 && a.name.empty() && a.writeName.empty(),"Invalid delegator accessor");checkAccessor(a.steps.front(),w,depth+1);return; }
-    if (a.className == "MAChainAccessor") {
+    if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor") {
+        need(a.className != "MACompositeAccessor" || a.steps.size() == 2,
+             "Composite requires exactly head and next");
         need(a.steps.size() >= 2 && a.name.empty() && a.writeName.empty(), "Invalid chain accessor");
         for (const auto &step : a.steps)
             checkAccessor(step, w, depth + 1);
@@ -203,8 +208,28 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
         auto block = a.readBlock;
         need(static_cast<bool>(block), "Pluggable accessor read block is missing");
         auto result = (*block)(m);
-        (void)encodeValue(result, w.l);
+        detail::checkLocalValue(result, w.l);
         return result;
+    }
+    if (a.className == "MACompositeAccessor") {
+        auto elements = accessRead(a.steps[0], m, g, w, depth + 1);
+        need(elements.collectionSize() <= w.l.items, "Composite item limit");
+        Value::Array values;
+        for (const auto &e : elements.elements()) {
+            w.tick(depth);
+            need(g, "Composite traversal requires graph resolver");
+            values.push_back(accessRead(a.steps[1], g->resolve(e), g, w, depth + 1));
+        }
+        std::set<std::string> keys;
+        for (const auto &v : values)
+            keys.insert(detail::valueKey(v, w.l, w.n, depth + 1));
+        if (keys.size() > 1) {
+            auto c = std::make_shared<CompositeConflict>();
+            c->kind = a.kind;
+            return Value(c);
+        }
+        need(!values.empty(), "Composite read of empty collection");
+        return values.front();
     }
     if (a.className == "MANullAccessor")
         throw Error("MAReadError: null accessor");
@@ -229,10 +254,22 @@ Value accessRead(const Accessor &a, const Model &m, const Graph *g, Work &w, std
 void accessWrite(const Accessor &a, Model &m, Value v, Graph *g, Work &w, std::size_t depth) {
     w.tick(depth);
     if (a.className == "MAPluggableAccessor") {
-        (void)encodeValue(v, w.l);
+        detail::checkLocalValue(v, w.l);
         auto block = a.writeBlock;
         need(static_cast<bool>(block), "Pluggable accessor write block is missing");
         (*block)(m, v);
+        return;
+    }
+    if (a.className == "MACompositeAccessor") {
+        auto elements = accessRead(a.steps[0], m, g, w, depth + 1);
+        need(elements.collectionSize() <= w.l.items, "Composite item limit");
+        for (const auto &e : elements.elements()) {
+            w.tick(depth);
+            if (v.conflict())
+                continue;
+            need(g, "Composite traversal requires graph resolver");
+            accessWrite(a.steps[1], g->resolve(e), v, g, w, depth + 1);
+        }
         return;
     }
     if (a.className == "MANullAccessor" || a.className == "MAIdentityAccessor")
@@ -282,6 +319,18 @@ bool accessCan(const Accessor &a, CapabilityTarget target, const Graph *g, Work 
         return target.resolve(g).hasVariable(a.name);
     if (a.className == "MADelegatorAccessor")
         return accessCan(a.steps.front(), target, g, w, depth + 1, writing);
+    if (a.className == "MACompositeAccessor") {
+        if (!accessCan(a.steps[0], target, g, w, depth + 1, false))
+            return false;
+        auto elements = accessRead(a.steps[0], target.resolve(g), g, w, depth + 1);
+        need(elements.collectionSize() <= w.l.items, "Composite item limit");
+        for (const auto &e : elements.elements()) {
+            w.tick(depth);
+            if (!accessCan(a.steps[1], {nullptr, &e}, g, w, depth + 1, writing))
+                return false;
+        }
+        return true;
+    }
     Value next;
     for (std::size_t i = 0; i + 1 < a.steps.size(); ++i) {
         if (!accessCan(a.steps[i], target, g, w, depth + 1, false))
@@ -306,7 +355,7 @@ Value inferredName(const Accessor &a, Work &w, std::size_t depth) {
         return {};
     if (a.className == "MADelegatorAccessor")
         return inferredName(a.steps.front(), w, depth + 1);
-    if (a.className == "MAChainAccessor") {
+    if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor") {
         auto result = inferredName(a.steps.back(), w, depth + 1);
         for (std::size_t i = a.steps.size() - 1; i > 0; --i) {
             const bool symbol = result.data.index() == 8;
@@ -327,7 +376,7 @@ std::string inferredLabel(const Accessor &a, Work &w, std::size_t depth) {
         return "";
     if (a.className == "MADelegatorAccessor")
         return inferredLabel(a.steps.front(), w, depth + 1);
-    if (a.className == "MAChainAccessor") {
+    if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor") {
         auto result = inferredLabel(a.steps.front(), w, depth + 1);
         for (std::size_t i = 1; i < a.steps.size(); ++i)
             result = boundedJoin(result, inferredLabel(a.steps[i], w, depth + 1), w, depth);
@@ -510,7 +559,12 @@ std::string write(const Description &d, const Value &v, const Graph *g, Work &w,
     else if (d.isContainer()) {
         need(g, "Container writer requires graph resolver");
         result = writeModel(d, g->resolve(v), g, w, depth + 1);
-    } else if(d.className=="MAClassDescription"){auto cls=std::get_if<Value::Class>(&v.data);need(cls && detail::knownClass(cls->name),"Class writer requires a portable Class");result=cls->name;
+    } else if (v.conflict() && d.className != "MABooleanDescription" && !d.isReference()) {
+        result = v.conflict()->string();
+    } else if (d.className == "MAClassDescription") {
+        auto cls = std::get_if<Value::Class>(&v.data);
+        need(cls && detail::knownClass(cls->name), "Class writer requires a portable Class");
+        result = cls->name;
     } else if (d.className == "MABooleanDescription") {
         need(v.data.index() == 1, "Boolean writer requires Boolean");
         result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
@@ -649,6 +703,8 @@ double floatFromBits(const std::string &s) {
     return n;
 }
 std::string displayString(const Value &v) {
+    if (auto c = v.conflict())
+        return c->string();
     if (v.isNil())
         return "nil";
     if (auto s = std::get_if<std::string>(&v.data))

@@ -59,16 +59,25 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
     };
     std::string result = std::to_string(v.data.index()) + ":";
     switch (v.data.index()) {
-        case 0: return result;
-        case 1: return result + (std::get<bool>(v.data) ? "1" : "0");
-        case 2: return result + std::to_string(std::get<std::int64_t>(v.data));
-        case 8: return "3:" + wrap(hex(std::get<Value::Symbol>(v.data).utf8));
-        case 9: {
-            auto n = std::get<double>(v.data);
-            if (!std::isfinite(n)) throw Error("Non-finite float");
-            if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 && std::trunc(n) == n) return "2:" + std::to_string(static_cast<std::int64_t>(n));
-            return result + floatBits(n);
-        }
+    case 11:
+        (void)v.conflict();
+        return "11:MACompositeConflict";
+    case 0:
+        return result;
+    case 1:
+        return result + (std::get<bool>(v.data) ? "1" : "0");
+    case 2:
+        return result + std::to_string(std::get<std::int64_t>(v.data));
+    case 8:
+        return "3:" + wrap(hex(std::get<Value::Symbol>(v.data).utf8));
+    case 9: {
+        auto n = std::get<double>(v.data);
+        if (!std::isfinite(n))
+            throw Error("Non-finite float");
+        if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 && std::trunc(n) == n)
+            return "2:" + std::to_string(static_cast<std::int64_t>(n));
+        return result + floatBits(n);
+    }
         case 10: {auto name=std::get<Value::Class>(v.data).name;if(!knownClass(name))throw Error("Unknown portable class");return result+wrap(hex(name));}
         case 3: return result + wrap(hex(std::get<std::string>(v.data)));
         case 5: return result + wrap(hex(std::get<Value::Reference>(v.data).id));

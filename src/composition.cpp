@@ -16,7 +16,8 @@ struct Work {
         b.check(limits);
         if (a.className != b.className)
             return false;
-        if (a.className == "MAChainAccessor" || a.className=="MADelegatorAccessor") {
+        if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor" ||
+            a.className == "MADelegatorAccessor") {
             if (a.steps.size() != b.steps.size())
                 return false;
             for (std::size_t i = 0; i < a.steps.size(); ++i)

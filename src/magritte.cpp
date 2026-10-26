@@ -76,13 +76,25 @@ Value value(const J& j, Limits l, std::size_t depth = 0) {
 J wire(const Value& v, Limits l, std::size_t depth = 0) {
     require(depth <= l.depth, "Value depth limit");
     switch (v.data.index()) {
-        case 0: return J{{"type", "nil"}};
-        case 1: return J{{"type", "boolean"}, {"value", std::get<bool>(v.data)}};
-        case 2: return J{{"type", "integer"}, {"value", std::to_string(std::get<std::int64_t>(v.data))}};
-        case 3: return J{{"type", "string"}, {"value", std::get<std::string>(v.data)}};
-        case 8: return J{{"type", "symbol"}, {"value", std::get<Value::Symbol>(v.data).utf8}};
-        case 9: return J{{"type", "float"}, {"value", detail::floatBits(std::get<double>(v.data))}};
-        case 10: {auto name=std::get<Value::Class>(v.data).name;require(detail::knownClass(name),"Unknown portable class");return J{{"type","class"},{"value",name}};}
+    case 11:
+        throw Error("Composite conflicts are local objects and cannot be exported");
+    case 0:
+        return J{{"type", "nil"}};
+    case 1:
+        return J{{"type", "boolean"}, {"value", std::get<bool>(v.data)}};
+    case 2:
+        return J{{"type", "integer"}, {"value", std::to_string(std::get<std::int64_t>(v.data))}};
+    case 3:
+        return J{{"type", "string"}, {"value", std::get<std::string>(v.data)}};
+    case 8:
+        return J{{"type", "symbol"}, {"value", std::get<Value::Symbol>(v.data).utf8}};
+    case 9:
+        return J{{"type", "float"}, {"value", detail::floatBits(std::get<double>(v.data))}};
+    case 10: {
+        auto name = std::get<Value::Class>(v.data).name;
+        require(detail::knownClass(name), "Unknown portable class");
+        return J{{"type", "class"}, {"value", name}};
+    }
         case 5: return J{{"type", "reference"}, {"value", identity(J(std::get<Value::Reference>(v.data).id))}};
         case 6: {
             auto text = std::get<Value::Character>(v.data).utf8;
@@ -149,7 +161,9 @@ J accessorWire(const Accessor &a, Limits l, std::size_t depth = 0) {
     if (a.className == "MANullAccessor")
         j["uuid"] = wire(a.uuid, l);
     else if(a.className=="MADelegatorAccessor")return J{{"class",a.className},{"next",accessorWire(a.steps.at(0),l,depth+1)}};
-    if (a.className == "MAChainAccessor") {
+    if (a.className == "MACompositeAccessor")
+        j["kind"] = a.kind ? wire(Value(Value::Class{*a.kind}), l) : wire(Value(), l);
+    if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor") {
         j["steps"] = J::array();
         for (const auto &step : a.steps)
             j["steps"].push_back(accessorWire(step, l, depth + 1));
@@ -170,9 +184,19 @@ Accessor accessorValue(const J &j, Limits l, std::size_t depth = 0) {
     if (a.className == "MANullAccessor") {
         keys(j, {"class", "uuid"});
         a.uuid = value(j.at("uuid"), l);
-    } else if(a.className=="MADelegatorAccessor"){keys(j,{"class","next"});a.steps.push_back(accessorValue(j.at("next"),l,depth+1));}
-    else if (a.className == "MAChainAccessor") {
-        keys(j, {"class", "steps"});
+    } else if (a.className == "MADelegatorAccessor") {
+        keys(j, {"class", "next"});
+        a.steps.push_back(accessorValue(j.at("next"), l, depth + 1));
+    } else if (a.className == "MAChainAccessor" || a.className == "MACompositeAccessor") {
+        if (a.className == "MACompositeAccessor") {
+            keys(j, {"class", "steps", "kind"});
+            auto kind = value(j.at("kind"), l);
+            if (!kind.isNil()) {
+                require(kind.data.index() == 10, "Composite kind must be Class or nil");
+                a.kind = std::get<Value::Class>(kind.data).name;
+            }
+        } else
+            keys(j, {"class", "steps"});
         require(j.at("steps").is_array(), "Expected accessor steps");
         for (const auto &step : j.at("steps"))
             a.steps.push_back(accessorValue(step, l, depth + 1));
@@ -239,7 +263,10 @@ void supported(const Description &d) {
             require(v.isNil() || std::holds_alternative<std::string>(v.data), "Expected text property: " + k);
         else if (k == "stringReader" || k == "stringWriter" || k == "validator") {
             auto cls=std::get_if<Value::Class>(&v.data);require(cls && cls->name==(k=="stringReader"?"MAStringReader":k=="stringWriter"?"MAStringWriter":"MAValidatorVisitor"), "Unsupported interpreter class override");
-        }
+        } else if (k == "kind")
+            require(v.isNil() || (v.data.index() == 10 &&
+                                  detail::knownClass(std::get<Value::Class>(v.data).name)),
+                    "Description kind must be Class or nil");
         else if (k == "name")
             require(v.isNil() || v.data.index() == 3 || v.data.index() == 8, "Expected description name");
         else if (k != "default" && k != "undefinedValue" && k.rfind("metadata:", 0) != 0)
@@ -275,8 +302,26 @@ Value Description::property(const std::string &name, Limits limits) const {
     auto it = properties.find(name);
     if (it != properties.end()) {
         if (name == "label" || name == "name")
-            (void)encodeValue(it->second, limits);
+            detail::checkLocalValue(it->second, limits);
         return it->second;
+    }
+    if (name == "kind") {
+        std::string kind = "Object";
+        if (className == "MAClassDescription")
+            kind = "Class";
+        else if (className == "MASymbolDescription")
+            kind = "Symbol";
+        else if (className == "MANumberDescription")
+            kind = "Number";
+        else if (className == "MABooleanDescription")
+            kind = "Boolean";
+        else if (className == "MATokenDescription")
+            kind = "Array";
+        else if (isMultiple())
+            kind = "Collection";
+        else if (ClassRegistry::global().includesBehavior(className, "MAStringDescription"))
+            kind = "String";
+        return Value(Value::Class{kind});
     }
     if(name=="stringReader")return Value(Value::Class{"MAStringReader"});
     if(name=="stringWriter")return Value(Value::Class{"MAStringWriter"});
@@ -296,7 +341,7 @@ Value Description::property(const std::string &name, Limits limits) const {
     if (name == "undefined") return Value("");
     if (name == "label") {
         auto result = Value(defaultLabel(limits));
-        (void)encodeValue(result, limits);
+        detail::checkLocalValue(result, limits);
         return result;
     }
     if (name == "name")
@@ -334,6 +379,8 @@ void NativeModel::writeUsing(const Description& d, Value v) {
 }
 namespace {
 bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
+    if (auto c = v.conflict())
+        return c->kindOf(kind);
     if (auto r = std::get_if<Value::Reference>(&v.data)) {
         require(graph, "Object reference validation requires a graph resolver"); return graph->resolve(*r).kindOf(kind);
     }
@@ -384,6 +431,14 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
         auto e = validateModel(d, graph->resolve(v), graph, budget, depth + 1); errors.insert(errors.end(), e.begin(), e.end()); return errors;
     }
     bool kind = true;
+    if ((d.isRelation() || d.isOption()) && d.properties.count("kind")) {
+        auto expected = d.property("kind");
+        require(expected.data.index() == 10, "Description kind is nil");
+        if (!kindOf(v, std::get<Value::Class>(expected.data).name, graph)) {
+            error("MAKindError");
+            return errors;
+        }
+    }
     if (d.isRelation()) {
         auto check = [&](const Value& e) {
             budget.tick(depth);
@@ -417,7 +472,9 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
             }
         } else check(v);
     } else {
-        kind = kindOf(v, d.className == "MAClassDescription" ? "Class" : d.className == "MASymbolDescription" ? "Symbol" : d.className == "MATokenDescription" ? "Array" : d.className == "MANumberDescription" ? "Number" : d.className == "MABooleanDescription" ? "Boolean" : "String", graph);
+        auto expected = d.property("kind");
+        require(expected.data.index() == 10, "Description kind is nil");
+        kind = kindOf(v, std::get<Value::Class>(expected.data).name, graph);
         if (!kind) error("MAKindError");
     }
     if (!kind) return errors;
@@ -480,10 +537,18 @@ Graph Graph::decode(const std::string& input, Limits l) {
         keys(j, {"format", "root", "descriptions", "objects"});
         require(j.at("format") == "magritte.graph/1" || j.at("format") == "magritte.graph/2" || j.at("format") == "magritte.graph/3" || j.at("format") == "magritte.graph/4", "Unsupported format");
         if(j.at("format")!="magritte.graph/4") {
-            std::function<void(const J&)> legacy=[&](const J& node){
-                if(node.is_object() && ((node.contains("type") && node.at("type").is_string() && node.at("type")=="class") || (node.contains("class") && node.at("class").is_string() && node.at("class")=="MADelegatorAccessor")))throw Error("Class values and delegators require graph/4");
-                if(node.is_structured())for(const auto& child:node)legacy(child);
-            };legacy(j);
+            std::function<void(const J &)> legacy = [&](const J &node) {
+                if (node.is_object() && ((node.contains("type") && node.at("type").is_string() &&
+                                          node.at("type") == "class") ||
+                                         (node.contains("class") && node.at("class").is_string() &&
+                                          (node.at("class") == "MADelegatorAccessor" ||
+                                           node.at("class") == "MACompositeAccessor"))))
+                    throw Error("Class values and delegators require graph/4");
+                if (node.is_structured())
+                    for (const auto &child : node)
+                        legacy(child);
+            };
+            legacy(j);
         }
         Graph g; g.format = string(j.at("format")); g.root = identity(j.at("root"));
         require(j.at("descriptions").is_array() && j.at("descriptions").size() <= l.nodes, "Description node limit");

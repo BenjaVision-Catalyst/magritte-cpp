@@ -3,7 +3,7 @@
 
 namespace magritte {
 namespace {
-void bounded(const Value& value, Limits limits) { (void)encodeValue(value, limits); }
+void bounded(const Value &value, Limits limits) { detail::checkLocalValue(value, limits); }
 }
 Value DynamicOptions::selectMatching(const std::string& query, Limits limits) const {
     bounded(Value(query), limits);

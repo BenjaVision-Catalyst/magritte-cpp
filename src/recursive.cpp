@@ -143,9 +143,9 @@ Graph accessorMetadata(const AccessorObject &object) {
         addMetadata(g, "key", "MASymbolDescription")->properties["required"] = Value(true);
     if (cls == "MASelectorAccessor")
         addMetadata(g, "selector", "MASymbolDescription");
-    if (cls == "MAChainAccessor" || cls == "MADelegatorAccessor") {
+    if (cls == "MAChainAccessor" || cls == "MACompositeAccessor" || cls == "MADelegatorAccessor") {
         addMetadata(g, "next", "MAToOneRelationDescription", 100)->classes = accessorClasses();
-        if (cls == "MAChainAccessor")
+        if ((cls == "MAChainAccessor" || cls == "MACompositeAccessor"))
             addMetadata(g, "accessor", "MAToOneRelationDescription", 200)->classes = accessorClasses();
     }
     return g;
@@ -367,9 +367,11 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             if ((selector == "selector" || selector == "selector:") && cls == "MASelectorAccessor")
                 return true;
             if ((selector == "next" || selector == "next:") &&
-                (cls == "MAChainAccessor" || cls == "MADelegatorAccessor"))
+                (cls == "MAChainAccessor" || cls == "MACompositeAccessor" ||
+                 cls == "MADelegatorAccessor"))
                 return true;
-            return (selector == "accessor" || selector == "accessor:") && cls == "MAChainAccessor";
+            return (selector == "accessor" || selector == "accessor:") &&
+                   (cls == "MAChainAccessor" || cls == "MACompositeAccessor");
         }
         Value readSlot(const std::string &strategy, const std::string &name) const override {
             auto s = state();
@@ -413,8 +415,10 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             if (!ref || !s->accessors.count(ref->id))
                 throw Error("Accessor slot requires a bound accessor");
             auto node = s->accessors.at(ref->id);
-            if ((name == "next:" && (cls == "MAChainAccessor" || cls == "MADelegatorAccessor")) ||
-                (name == "accessor:" && cls == "MAChainAccessor")) {
+            if ((name == "next:" && (cls == "MAChainAccessor" || cls == "MACompositeAccessor" ||
+                                     cls == "MADelegatorAccessor")) ||
+                (name == "accessor:" &&
+                 (cls == "MAChainAccessor" || cls == "MACompositeAccessor"))) {
                 auto &slot = name == "next:" ? target->next : target->accessor;
                 auto old = slot;
                 slot = node;
