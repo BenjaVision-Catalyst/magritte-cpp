@@ -266,6 +266,8 @@ void supported(const Description &d) {
                     "Expected thousands separator character");
         } else if (k == "lineCount")
             require(d.className == "MAMemoDescription" && v.data.index() == 2, "Expected memo line count");
+        else if (k == "maPrintString" || k == "maPrintStringSeparator")
+            require(v.isNil(), "Print settings require local callable slots or explicit nil");
         else if (k == "displayBlockOrSymbol")
             require(v.isNil() || v.data.index() == 8,
                     "Display must be Symbol or nil; use displayBlock for local callbacks");
@@ -333,6 +335,9 @@ bool Description::isContainer() const { return className == "MAContainer" || cla
 Value Description::property(const std::string &name, Limits limits) const {
     if (name == "displayBlockOrSymbol" && displayBlock)
         throw Error("Display block is local; inspect displayBlock rather than a Value snapshot");
+    if ((name == "maPrintString" && printStringBlock) ||
+        (name == "maPrintStringSeparator" && printSeparatorBlock))
+        throw Error("Print block is local; inspect its callable slot");
     if (name == "requiredErrorMessage")
         return requiredErrorMessage(limits);
     if (name == "kindErrorMessage")
@@ -640,7 +645,12 @@ Graph Graph::decode(const std::string& input, Limits l) {
             require(g.format == "magritte.graph/4" || d->className != "MAClassDescription", "Class descriptions require graph/4");
             require(g.format != "magritte.graph/1" || !d->isReference(), "Reference descriptions require graph/2");
             require(n.at("properties").is_object(), "Expected properties dictionary");
-            for (auto it = n.at("properties").begin(); it != n.at("properties").end(); ++it) { (void)identity(J(it.key())); d->properties.emplace(it.key(), value(it.value(), l)); }
+            for (auto it = n.at("properties").begin(); it != n.at("properties").end(); ++it) {
+                (void)identity(J(it.key()));
+                require(it.key() != "maPrintString" && it.key() != "maPrintStringSeparator",
+                        "Print settings are local callable state");
+                d->properties.emplace(it.key(), value(it.value(), l));
+            }
             if (!d->isContainer()) {
                 auto a = accessorValue(n.at("accessor"),l);
                 require(g.format >= "magritte.graph/3" || a.className == "MADictionaryAccessor", "Accessor requires graph/3");
@@ -775,7 +785,9 @@ std::string Graph::encode(Limits l) const {
             require(!d.options.isDynamic(), "Local dynamic option providers are not portable; replace with explicit static options before export");
             require(!d.accessorObject, "Live accessor identity is local; materialize an explicit snapshot before export");
             require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction &&
-                        !d.displayBlock,
+                        !d.displayBlock && !d.printStringBlock && !d.printSeparatorBlock &&
+                        !d.properties.count("maPrintString") &&
+                        !d.properties.count("maPrintStringSeparator"),
                     "Local executable behavior is not portable");
             J n{{"id", d.id}, {"class", d.className}, {"properties", J::object()}};
             if (d.definingContext) {

@@ -27,12 +27,17 @@ Value call(const std::function<Value(const Value &)> &block, const Value &value,
 }
 } // namespace
 bool Description::hasProperty(const std::string &name) const {
-    return properties.count(name) || (name == "displayBlockOrSymbol" && displayBlock);
+    return properties.count(name) || (name == "displayBlockOrSymbol" && displayBlock) ||
+           (name == "maPrintString" && printStringBlock) ||
+           (name == "maPrintStringSeparator" && printSeparatorBlock);
 }
 Value Description::propertyAt(const std::string &name, Limits limits) const {
     checkPropertyKey(name, limits);
     if (name == "displayBlockOrSymbol" && displayBlock)
         throw Error("Display block has no stored Value representation");
+    if ((name == "maPrintString" && printStringBlock) ||
+        (name == "maPrintStringSeparator" && printSeparatorBlock))
+        throw Error("Print block has no stored Value representation");
     auto found = properties.find(name);
     if (found == properties.end())
         throw Error("MAPropertyError: property not found: " + name);
@@ -83,6 +88,10 @@ Value Description::propertyPut(const std::string &name, Value value, Limits limi
     writable(*this, name);
     value = checked(std::move(value), limits);
     properties[name] = value;
+    if (name == "maPrintString")
+        printStringBlock.reset();
+    if (name == "maPrintStringSeparator")
+        printSeparatorBlock.reset();
     if (name == "displayBlockOrSymbol")
         displayBlock.reset();
     return value;

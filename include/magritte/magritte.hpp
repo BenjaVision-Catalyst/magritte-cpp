@@ -182,6 +182,31 @@ struct Accessor {
     std::string defaultLabelFor(const Description &, Limits = {}) const;
     void check(Limits = {}) const;
 };
+// Minimal bounded native write-stream bridge for Magritte's printing protocol.
+class PrintStream {
+    Limits limits_;
+    std::string contents_;
+    std::size_t work_ = 0;
+
+  public:
+    explicit PrintStream(Limits limits = {}) : limits_(limits) {}
+    const Limits &limits() const { return limits_; }
+    const std::string &contents() const { return contents_; }
+    void append(const std::string &);
+};
+struct PrintValueBlock {
+    const std::function<std::string(const Value &)> operation;
+    explicit PrintValueBlock(std::function<std::string(const Value &)> f)
+        : operation(std::move(f)) {}
+    explicit PrintValueBlock(std::function<std::string()> f)
+        : operation([f = std::move(f)](const Value &) { return f(); }) {}
+};
+struct PrintSeparatorBlock {
+    const std::function<void(PrintStream &)> operation;
+    explicit PrintSeparatorBlock(std::function<void(PrintStream &)> f) : operation(std::move(f)) {}
+    explicit PrintSeparatorBlock(std::function<void()> f)
+        : operation([f = std::move(f)](PrintStream &) { f(); }) {}
+};
 struct DisplayBlock {
     using Operation = std::function<std::string(const Value &, const Description &)>;
     const Operation operation;
@@ -231,6 +256,13 @@ struct Description : Model {
     std::string id, className = "MAStringDescription", key;
     std::shared_ptr<DescriptionContext> definingContext;
     std::shared_ptr<DisplayBlock> displayBlock;
+    std::shared_ptr<PrintValueBlock> printStringBlock;
+    std::shared_ptr<PrintSeparatorBlock> printSeparatorBlock;
+    Description &setPrintString(std::shared_ptr<PrintValueBlock>, Limits = {});
+    Description &setPrintSeparator(std::shared_ptr<PrintSeparatorBlock>, Limits = {});
+    std::string readToString(const Model &, const Graph * = nullptr, Limits = {}) const;
+    void printFor(const Model &, PrintStream &, const Graph * = nullptr) const;
+    void print(const Model &, PrintStream &, const Graph * = nullptr) const;
     void display(std::string selector);
     void display(std::shared_ptr<DisplayBlock>);
     std::string displayStringFor(const Value &, const Graph * = nullptr, Limits = {}) const;
