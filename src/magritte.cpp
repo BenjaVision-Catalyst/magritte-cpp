@@ -386,7 +386,8 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
     } else if (d.isOption()) {
         auto check = [&](const Value& e) {
             bool member = false;
-            for (const auto& option : d.options) { budget.tick(depth); if (detail::valueKey(e, budget.limits, budget.work) == detail::valueKey(option, budget.limits, budget.work)) { member = true; break; } }
+            if (d.options.isDynamic()) { budget.tick(depth); member = d.options.provider()->includes(e, budget.limits); }
+            else for (const auto& option : d.options.values(budget.limits)) { budget.tick(depth); if (detail::valueKey(e, budget.limits, budget.work) == detail::valueKey(option, budget.limits, budget.work)) { member = true; break; } }
             if (member) return;
             if (!d.flag("extensible")) { error("MAKindError"); kind = false; return; }
             auto nested = validateField(*d.referenceDescription(), e, graph, budget, depth + 1);
@@ -590,7 +591,7 @@ Graph Graph::decode(const std::string& input, Limits l) {
         };
         for (const auto& p : g.descriptions) {
             for (const auto& property : p.second->properties) references(property.second, 0);
-            for (const auto& option : p.second->options) references(option, 0);
+            for (const auto& option : p.second->options.values(l)) references(option, 0);
             for (const auto& label : p.second->labels) references(label.first, 0);
         }
         for (const auto& o : g.objects) for (const auto& v : o.second.values) references(v.second, 0);
@@ -606,6 +607,7 @@ std::string Graph::encode(Limits l) const {
         for (const auto& p : descriptions) {
             require(bool(p.second) && p.first == p.second->id, "Inconsistent description identity");
             const auto& d = *p.second; supported(d); detail::checkPortableDescription(d,l,portableWork);
+            require(!d.options.isDynamic(), "Local dynamic option providers are not portable; replace with explicit static options before export");
             require(!d.accessorObject, "Live accessor identity is local; materialize an explicit snapshot before export");
             require(d.conditions.empty() && !d.nativeRead && !d.nativeWrite && !d.defaultFunction, "Local executable behavior is not portable");
             J n{{"id", d.id}, {"class", d.className}, {"properties", J::object()}};
@@ -630,7 +632,7 @@ std::string Graph::encode(Limits l) const {
             if (d.isRelation()) n["classes"] = d.classes;
             if (d.isOption()) {
                 n["options"] = J::array(); n["labels"] = J::array();
-                for (const auto& option : d.options) n["options"].push_back(wire(option, l));
+                for (const auto& option : d.options.values(l)) n["options"].push_back(wire(option, l));
                 for (const auto& label : d.labels) n["labels"].push_back(J{{"value", wire(label.first, l)}, {"label", label.second}});
             }
             j["descriptions"].push_back(n);

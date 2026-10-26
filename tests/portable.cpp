@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
             check(password.isObfuscated(v) == c.at("isObfuscated"), "GT password mask recognition");
         }
         auto boolean = g.descriptions.at("boolean");
-        check(Value(boolean->allOptions()) == value(edges.at("booleanOptions")), "GT Boolean options");
+        check(Value(boolean->allOptions().values()) == value(edges.at("booleanOptions")), "GT Boolean options");
         for (const auto &c : edges.at("booleanLabels"))
             check(boolean->labelForOption(value(c.at("input"))) == c.at("label"), "GT Boolean labels");
         Description token;

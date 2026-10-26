@@ -118,13 +118,25 @@ std::string Description::labelForOption(const Value& v, Limits l) const {
     }
     return bounded(detail::displayString(v));
 }
-std::vector<Value> Description::allOptionsWith(const Value& current, Limits l) const {
+Options Description::allOptionsWith(const Value& current, Limits l) const {
     if (className == "MABooleanDescription") { if(l.visits<2||l.items<2)throw Error("Boolean option item/work limit");return {Value(false),Value(true)}; }
+    if (!isOption()) throw Error("Option operation requires option description");
+    if (options.isDynamic()) {
+        // shouldNotInclude: short-circuits before copying; dynamic sources have no copyWith:.
+        if (flag("extensible") && !current.isNil() && !options.provider()->includes(current, l))
+            throw Error("Dynamic options do not implement copyWith:");
+        std::vector<OptionItem> items;
+        if (!isMultiple() && !flag("required")) items.emplace_back(property("undefinedValue"));
+        // Object>>asArray wraps the copied provider. Sorting a singleton invokes no comparator.
+        items.emplace_back(options.provider()->copy());
+        (void)flag("sorted");
+        if (items.size() > l.items || l.visits < 1) throw Error("Options item/work limit");
+        return Options::collection(std::move(items));
+    }
     std::size_t work = 0;
     bool contains = false; auto key = detail::valueKey(current, l, work);
-    for (const auto& option : options) if (detail::valueKey(option, l, work) == key) contains = true;
-    if (!isOption()) throw Error("Option operation requires option description");
-    auto result = options;
+    for (const auto& option : options.values(l)) if (detail::valueKey(option, l, work) == key) contains = true;
+    auto result = options.values(l);
     if (flag("extensible") && !current.isNil() && !contains) result.push_back(current);
     if (flag("sorted")) {
         auto ref = referenceDescription();
@@ -145,7 +157,10 @@ std::vector<Value> Description::allOptionsWith(const Value& current, Limits l) c
     if (!isMultiple() && !flag("required")) result.insert(result.begin(), property("undefinedValue"));
     return result;
 }
-std::vector<Value> Description::allOptions(Limits l) const { return allOptionsWith({}, l); }
+Options Description::allOptions(Limits l) const {
+    if (isOption() && options.isDynamic()) return options.provider();
+    return allOptionsWith({}, l);
+}
 bool NativeModel::kindOf(const std::string& name) const { auto& registry=ClassRegistry::global();
     bool registered=std::any_of(classes_.begin(),classes_.end(),[&](const auto& cls){return registry.find(cls).has_value();});
     return (!registered && registry.includesBehavior("Object",name)) || std::any_of(classes_.begin(),classes_.end(),[&](const auto& cls){return cls==name || registry.includesBehavior(cls,name);}); }

@@ -150,7 +150,7 @@ int main(int argc,char** argv) { try {
     auto relation=std::make_shared<Description>(); relation->id="visitor.relation"; relation->className="MAToOneRelationDescription";
     auto reference=std::make_shared<Description>(); reference->id="visitor.reference"; reference->className="MAContainer"; relation->reference=reference;
     RecursiveDescriptionModel metadata; auto schema=metadata.describeReflective(relation);
-    const auto& choices=metadata.resolver().descriptions.at(schema->id+".classes")->options;
+    const auto choices=metadata.resolver().descriptions.at(schema->id+".classes")->options.values();
     check(std::find(choices.begin(),choices.end(),classValue)!=choices.end(),"New metadata discovers builder class without a projection");
     Limits small; small.visits=2; Probe limited(small); rejects([&]{limited.visitAll({a,b});});
     limited.visit(*a);

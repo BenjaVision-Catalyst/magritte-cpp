@@ -115,6 +115,7 @@ DescriptionCopy copy(std::shared_ptr<Description> source, const std::string &id,
                 throw Error("Recursive reference postCopy is unsupported; copy is not a graph deep clone");
             auto n = std::make_shared<Description>(*d);
             n->id = nextId;
+            if (d->isOption()) n->options = d->options.copy();
             if(d->accessorObject){n->accessorObject=AccessorObject::fromAccessor(nextId+".accessor",d->accessorObject->snapshot(l),l);n->accessor.reset();}
             result.retained.push_back(n);
             if (d->isReference())

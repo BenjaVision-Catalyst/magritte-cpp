@@ -229,10 +229,10 @@ struct RecursiveDescriptionModel::State : std::enable_shared_from_this<State> {
             }
             if (name == "optionsTextual" && target->isOption()) {
                 std::size_t work = 0;
-                (void)detail::valueKey(Value(target->options), s->limits, work);
+                (void)detail::valueKey(Value(target->options.values(s->limits)), s->limits, work);
                 std::string result;
                 bool first = true;
-                for (const auto &v : target->options) {
+                for (const auto &v : target->options.values(s->limits)) {
                     if (!first)
                         result += '\r';
                     first = false;

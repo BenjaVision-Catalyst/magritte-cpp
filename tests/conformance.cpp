@@ -35,8 +35,8 @@ void relationships(const char* exportPath) {
     }
     for (const auto& c : reference.at("optionCases")) {
         auto d = g.descriptions.at(c.at("description"));
-        check(Value(d->allOptions()) == v(c.at("allOptions")), "GT allOptions");
-        check(Value(d->allOptionsWith(v(c.at("current")))) == v(c.at("withCurrent")), "GT allOptionsWith");
+        check(Value(d->allOptions().values()) == v(c.at("allOptions")), "GT allOptions");
+        check(Value(d->allOptionsWith(v(c.at("current"))).values()) == v(c.at("withCurrent")), "GT allOptionsWith");
     }
     for (const auto& c : reference.at("labels")) check(g.descriptions.at(c.at("description"))->labelForOption(v(c.at("input"))) == c.at("label"), "GT option label");
     auto labelled = g.descriptions.at("limitedNumber");

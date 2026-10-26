@@ -86,6 +86,53 @@ struct AccessorObject;
 struct ConditionObject;
 struct Description;
 struct Graph;
+// MADynamicOptions stays a live local provider, with independent completion/membership/reader callbacks.
+struct DynamicOptions {
+    using Completion = std::function<Value(const std::string&)>;
+    using Membership = std::function<bool(const Value&)>;
+    using Reader = std::function<Value(const Value&)>;
+private:
+    // A Smalltalk shallow copy shares its Block objects, including mutable captured state.
+    std::shared_ptr<const Completion> block_;
+    std::shared_ptr<const Membership> includes_;
+    std::shared_ptr<const Reader> reader_;
+public:
+    explicit DynamicOptions(Completion callback = {}) { block(std::move(callback)); }
+    void block(Completion callback) { block_ = callback ? std::make_shared<Completion>(std::move(callback)) : nullptr; }
+    void includesBlock(Membership callback) { includes_ = callback ? std::make_shared<Membership>(std::move(callback)) : nullptr; }
+    void reader(Reader callback) { reader_ = callback ? std::make_shared<Reader>(std::move(callback)) : nullptr; }
+    std::shared_ptr<const Completion> block() const { return block_; }
+    std::shared_ptr<const Membership> includesBlock() const { return includes_; }
+    std::shared_ptr<const Reader> reader() const { return reader_; }
+    Value selectMatching(const std::string&, Limits = {}) const;
+    bool includes(const Value&, Limits = {}) const;
+    Value detect(const Value&, Limits = {}) const;
+    DynamicOptions& allOptionsFor(const Description&) { return *this; }
+    std::shared_ptr<DynamicOptions> copy() const;
+};
+using OptionItem = std::variant<Value, std::shared_ptr<DynamicOptions>>;
+// An upstream options result can be a collection or the provider itself. Provider entries are local objects.
+class Options {
+    std::variant<std::vector<OptionItem>, std::shared_ptr<DynamicOptions>> data_;
+public:
+    Options() : data_(std::vector<OptionItem>{}) {}
+    Options(std::vector<Value>);
+    Options(std::initializer_list<Value> values) : Options(std::vector<Value>(values)) {}
+    Options(std::shared_ptr<DynamicOptions>);
+    static Options collection(std::vector<OptionItem>);
+    bool isDynamic() const;
+    std::shared_ptr<DynamicOptions> provider() const;
+    const std::vector<OptionItem>& entries() const;
+    std::vector<Value> values(Limits = {}) const; // Explicit: fails for live providers/provider entries.
+    std::size_t size() const { return entries().size(); }
+    bool empty() const { return entries().empty(); }
+    void clear() { (void)entries(); std::get<std::vector<OptionItem>>(data_).clear(); }
+    void push_back(Value);
+    void pop_back();
+    Options copy() const;
+    Value selectMatching(const std::string&, Limits = {}) const;
+    bool operator==(const Options&) const;
+};
 struct Accessor {
     std::string className = "MADictionaryAccessor", name, writeName;
     Value uuid; // MANullAccessor comparison token, preserved without interpretation
@@ -128,7 +175,7 @@ struct Description : Model {
     // Graph owns descriptions. Non-owning reference edges permit recursive models.
     std::weak_ptr<Description> reference;
     std::vector<std::string> classes;
-    std::vector<Value> options;
+    Options options;
     std::vector<std::pair<Value, std::string>> labels;
     std::vector<Condition> conditions;
     std::vector<PortableCondition> portableConditions;
@@ -146,8 +193,8 @@ struct Description : Model {
     bool isReference() const { return isRelation() || isOption() || className == "MATokenDescription"; }
     bool isMultiple() const;
     std::shared_ptr<Description> referenceDescription() const;
-    std::vector<Value> allOptions(Limits = {}) const;
-    std::vector<Value> allOptionsWith(const Value&, Limits = {}) const;
+    Options allOptions(Limits = {}) const;
+    Options allOptionsWith(const Value&, Limits = {}) const;
     std::string labelForOption(const Value&, Limits = {}) const;
     std::string obfuscated(const Value&, Limits = {}) const;
     bool isObfuscated(const Value&) const;

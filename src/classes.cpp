@@ -90,6 +90,7 @@ ClassRegistry::ClassRegistry() : state_(std::make_unique<State>()) {
          {"MADescription", "MAObject", true, "Description"},
          {"MADescriptionBuilder", "MAVisitor", false, "Description Builder"},
          {"MADictionaryAccessor", "MAAccessor", false, "Dictionary Accessor"},
+         {"MADynamicOptions", "Object", false, "Dynamic Options"},
          {"MAElementDescription", "MADescription", true, "Element Description"},
          {"MAIdentityAccessor", "MAAccessor", false, "Identity Accessor"},
          {"MAMagnitudeDescription", "MAElementDescription", true, "Magnitude Description"},
