@@ -54,6 +54,10 @@ void checkLocalValue(const Value &value, Limits limits) {
                                                                    std::size_t depth) -> Value {
         if (++work > limits.visits || depth > limits.depth)
             throw Error("Local value work/depth limit");
+        if (v.isMutableCollection()) {
+          checkRuntimeValue(v, limits, work, depth);
+          return Value();
+        }
         if (auto c = v.conflict()) {
             if (c->kind && !ClassRegistry::global().find(*c->kind))
                 throw Error("Unknown conflict kind");

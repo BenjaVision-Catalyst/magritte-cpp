@@ -24,11 +24,13 @@ struct Work {
     }
 };
 std::string text(const Value &v) {
-    if (auto s = std::get_if<std::string>(&v.data))
-        return *s;
-    if (auto s = std::get_if<Value::Symbol>(&v.data))
-        return s->utf8;
-    throw Error("Expected text");
+  if (v.isMutableCollection() && v.mutableCollection()->kind() == "string")
+    return text(v.mutableCollection()->snapshot());
+  if (auto s = std::get_if<std::string>(&v.data))
+    return *s;
+  if (auto s = std::get_if<Value::Symbol>(&v.data))
+    return s->utf8;
+  throw Error("Expected text");
 }
 std::size_t arity(const std::string &s) {
     static const std::set<std::string> unary{"isNil",    "notNil",   "isEmpty", "notEmpty", "isInteger",
@@ -89,7 +91,7 @@ bool predicate(const Predicate &p, const Value &input, Work &w, std::size_t dept
     if (p.index)
         args[p.index - 1] = input;
     auto equal = [&](const Value &a, const Value &b) {
-        return detail::valueKey(a, w.l, w.n) == detail::valueKey(b, w.l, w.n);
+      return detail::valuesEqual(a, b, w.l, w.n);
     };
     const auto &s = p.selector;
     if (s == "isNil")
@@ -568,61 +570,69 @@ std::string writeModel(const Description &d, const Model &model, const Graph *g,
 }
 std::string write(const Description &d, const Value &v, const Graph *g, Work &w, std::size_t depth,
                   bool initial) {
-    w.tick(depth);
-    std::string result;
-    if (initial && v.isNil())
-        result = propText(d, "undefined");
-    else if (d.isContainer()) {
-        need(g, "Container writer requires graph resolver");
-        result = writeModel(d, g->resolve(v), g, w, depth + 1);
-    } else if (detail::descriptionIs(d, "MAClassDescription")) {
-        auto cls = std::get_if<Value::Class>(&v.data);
-        need(cls && detail::knownClass(cls->name), "Class writer requires a portable Class");
-        result = d.displayStringFor(v, g, w.l);
-    } else if (detail::descriptionIs(d, "MABooleanDescription")) {
-        need(v.data.index() == 1, "Boolean writer requires Boolean");
-        result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
-    } else if (detail::descriptionIs(d, "MASingleOptionDescription")) {
-        bool found = false;
-        for (const auto &label : d.labels) {
-            w.tick(depth);
-            need(detail::portableLabelKey(label.first), "Nonportable label key");
-            if (v.data.index() == label.first.data.index() &&
-                detail::valueKey(v, w.l, w.n) == detail::valueKey(label.first, w.l, w.n)) {
-                result = label.second;
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            result = d.displayStringFor(v, g, w.l);
-    } else if (detail::descriptionIs(d, "MATokenDescription") || d.isMultiple()) {
-        need(v.isCollection(), "Collection writer requires collection");
-        need(v.collectionSize() <= w.l.visits - w.n, "Writer collection work limit");
-        std::string sep = ", ";
-        if (detail::descriptionIs(d, "MATokenDescription") && v.collectionSize() > 1) {
-            auto chars = Value(propText(d, "separators")).elements();
-            need(!chars.empty(), "Token writer requires separator");
-            sep = std::get<Value::Character>(chars.front().data).utf8;
-        }
-        if (detail::descriptionIs(d, "MAMultipleOptionDescription") && v.collectionSize() == 0)
-            result = propText(d, "undefined");
-        else {
-            bool first = true;
-            for (const auto &e : v.elements()) {
-                if (!first)
-                    result += sep;
-                first = false;
-                if (d.isOption()) {
-                    auto one = d;
-                    one.className = "MASingleOptionDescription";
-                    result += write(one, e, g, w, depth + 1, false);
-                } else
-                    result += write(*d.referenceDescription(), e, g, w, depth + 1,
-                                    !detail::descriptionIs(d, "MATokenDescription"));
-                need(result.size() <= w.l.bytes, "String output byte limit");
-            }
-        }
+  if (v.isMutableCollection() && v.mutableCollection()->kind() == "string")
+    return write(d, v.mutableCollection()->snapshot(), g, w, depth + 1,
+                 initial);
+  w.tick(depth);
+  std::string result;
+  if (initial && v.isNil())
+    result = propText(d, "undefined");
+  else if (d.isContainer()) {
+    need(g, "Container writer requires graph resolver");
+    result = writeModel(d, g->resolve(v), g, w, depth + 1);
+  } else if (detail::descriptionIs(d, "MAClassDescription")) {
+    auto cls = std::get_if<Value::Class>(&v.data);
+    need(cls && detail::knownClass(cls->name),
+         "Class writer requires a portable Class");
+    result = d.displayStringFor(v, g, w.l);
+  } else if (detail::descriptionIs(d, "MABooleanDescription")) {
+    need(v.data.index() == 1, "Boolean writer requires Boolean");
+    result = propText(d, std::get<bool>(v.data) ? "trueString" : "falseString");
+  } else if (detail::descriptionIs(d, "MASingleOptionDescription")) {
+    bool found = false;
+    for (const auto &label : d.labels) {
+      w.tick(depth);
+      need(detail::portableLabelKey(label.first), "Nonportable label key");
+      if (v.data.index() == label.first.data.index() &&
+          detail::valueKey(v, w.l, w.n) ==
+              detail::valueKey(label.first, w.l, w.n)) {
+        result = label.second;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      result = d.displayStringFor(v, g, w.l);
+  } else if (detail::descriptionIs(d, "MATokenDescription") || d.isMultiple()) {
+    need(v.isCollection(), "Collection writer requires collection");
+    need(v.collectionSize() <= w.l.visits - w.n,
+         "Writer collection work limit");
+    std::string sep = ", ";
+    if (detail::descriptionIs(d, "MATokenDescription") &&
+        v.collectionSize() > 1) {
+      auto chars = Value(propText(d, "separators")).elements();
+      need(!chars.empty(), "Token writer requires separator");
+      sep = std::get<Value::Character>(chars.front().data).utf8;
+    }
+    if (detail::descriptionIs(d, "MAMultipleOptionDescription") &&
+        v.collectionSize() == 0)
+      result = propText(d, "undefined");
+    else {
+      bool first = true;
+      for (const auto &e : v.elements()) {
+        if (!first)
+          result += sep;
+        first = false;
+        if (d.isOption()) {
+          auto one = d;
+          one.className = "MASingleOptionDescription";
+          result += write(one, e, g, w, depth + 1, false);
+        } else
+          result += write(*d.referenceDescription(), e, g, w, depth + 1,
+                          !detail::descriptionIs(d, "MATokenDescription"));
+        need(result.size() <= w.l.bytes, "String output byte limit");
+      }
+    }
     } else if (d.isRelation())
         result = write(*d.referenceDescription(), v, g, w, depth + 1, true);
     else
@@ -646,7 +656,7 @@ void checkPortableDescription(const Description &d, Limits l, std::size_t &work)
 bool evaluatePredicate(const Predicate &p, const Value &v, Limits l, std::size_t &work) {
     Work w{l, work};
     checkPredicate(p, w, 0);
-    (void)detail::valueKey(v, l, w.n);
+    detail::checkRuntimeValue(v, l, w.n);
     auto result = predicate(p, v, w, 0);
     work = w.n;
     return result;
@@ -706,12 +716,14 @@ double floatFromBits(const std::string &s) {
     return n;
 }
 std::string displayString(const Value &v) {
-    if (v.data.index() == 12) {
-        auto f = detail::fractionOf(v);
-        return f.denominator == 1
-                   ? std::to_string(f.numerator)
-                   : "(" + std::to_string(f.numerator) + "/" + std::to_string(f.denominator) + ")";
-    }
+  if (v.isMutableCollection() && v.mutableCollection()->kind() == "string")
+    return displayString(v.mutableCollection()->snapshot());
+  if (v.data.index() == 12) {
+    auto f = detail::fractionOf(v);
+    return f.denominator == 1 ? std::to_string(f.numerator)
+                              : "(" + std::to_string(f.numerator) + "/" +
+                                    std::to_string(f.denominator) + ")";
+  }
     if (auto c = v.conflict())
         return c->string();
     if (v.isNil())
@@ -767,7 +779,7 @@ void Predicate::check(Limits l) const {
 bool Predicate::evaluate(const Value &v, Limits l) const {
     Work w{l};
     checkPredicate(*this, w, 0);
-    (void)detail::valueKey(v, l, w.n);
+    detail::checkRuntimeValue(v, l, w.n);
     return predicate(*this, v, w, 0);
 }
 void Accessor::check(Limits l) const {

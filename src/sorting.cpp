@@ -31,10 +31,13 @@ Value send(const Value &left, const std::string &selector, const Value &right, c
         return result;
     }
     std::size_t work = 0;
-    auto leftKey = detail::valueKey(left, limits, work),
-         rightKey = detail::valueKey(right, limits, work);
-    if (selector == "=" || selector == "~=")
-        return Value(selector == "=" ? leftKey == rightKey : leftKey != rightKey);
+    if (selector == "=" || selector == "~=") {
+        auto equal=detail::valuesEqual(left,right,limits,work);
+        return Value(selector=="=" ? equal:!equal);
+    }
+    if(left.isMutableCollection()&&left.mutableCollection()->kind()=="string")return send(left.mutableCollection()->snapshot(),selector,right,graph,limits);
+    if(right.isMutableCollection()&&right.mutableCollection()->kind()=="string")return send(left,selector,right.mutableCollection()->snapshot(),graph,limits);
+    (void)detail::valueKey(left,limits,work);(void)detail::valueKey(right,limits,work);
     if (selector != "<" && selector != "<=" && selector != ">" && selector != ">=")
         throw Error("Unbound scalar binary selector: " + selector);
     int comparison;

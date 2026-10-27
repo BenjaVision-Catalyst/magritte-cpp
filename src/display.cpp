@@ -27,12 +27,11 @@ Value NativeModel::displayMessage(const std::string &selector, const Description
 std::string Description::displayStringFor(const Value &value, const Graph *graph,
                                           Limits limits) const {
     std::size_t work = 0;
-    (void)detail::valueKey(value, limits, work);
     // Local validation checks Value shape/UTF-8; the byte limit applies to output text,
     // not the size of a temporary JSON envelope.
     auto validation = limits;
     validation.bytes = std::numeric_limits<std::size_t>::max();
-    detail::checkLocalValue(value, validation);
+    detail::checkRuntimeValue(value, validation, work);
     std::string result;
     if (auto block = displayBlock) {
         if (!block->operation)
@@ -64,8 +63,8 @@ std::string Description::displayStringFor(const Value &value, const Graph *graph
             result = *text;
         } else if (arity == 0 && (selector == "greaseString" || selector == "asString"))
             result = detail::displayString(value);
-        else if (selector == "yourself" && std::holds_alternative<std::string>(value.data))
-            result = std::get<std::string>(value.data);
+        else if(selector=="yourself"&&(std::holds_alternative<std::string>(value.data)||(value.isMutableCollection()&&value.mutableCollection()->kind()=="string")))
+            result = detail::displayString(value);
         else if (selector == "label" && std::holds_alternative<Value::Class>(value.data))
             result = ClassRegistry::global().find(std::get<Value::Class>(value.data).name)->label;
         else

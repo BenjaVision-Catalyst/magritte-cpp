@@ -34,96 +34,153 @@ J parse(const std::string& input, Limits l) {
         return true;
     });
 }
-Value value(const J& j, Limits l, std::size_t depth = 0) {
-    require(depth <= l.depth, "Value depth limit");
-    require(j.is_object() && j.contains("type"), "Expected tagged value");
-    const auto type = string(j.at("type"));
-    if (type == "nil") { keys(j, {"type"}); return {}; }
-    keys(j, {"type", "value"});
-    const auto& v = j.at("value");
-    if (type == "fraction") {
-        keys(v, {"numerator", "denominator"});
-        auto n = value(J{{"type", "integer"}, {"value", v.at("numerator")}}, l, depth + 1);
-        auto d = value(J{{"type", "integer"}, {"value", v.at("denominator")}}, l, depth + 1);
-        return Value(
-            Value::Fraction{std::get<std::int64_t>(n.data), std::get<std::int64_t>(d.data)});
+Value value(const J &j, Limits l, std::size_t depth = 0,
+            const CollectionStore *store = nullptr) {
+  require(depth <= l.depth, "Value depth limit");
+  require(j.is_object() && j.contains("type"), "Expected tagged value");
+  const auto type = string(j.at("type"));
+  if (type == "nil") {
+    keys(j, {"type"});
+    return {};
+  }
+  keys(j, {"type", "value"});
+  const auto &v = j.at("value");
+  if (type == "fraction") {
+    keys(v, {"numerator", "denominator"});
+    auto n = value(J{{"type", "integer"}, {"value", v.at("numerator")}}, l,
+                   depth + 1);
+    auto d = value(J{{"type", "integer"}, {"value", v.at("denominator")}}, l,
+                   depth + 1);
+    return Value(Value::Fraction{std::get<std::int64_t>(n.data),
+                                 std::get<std::int64_t>(d.data)});
+  }
+  if (type == "collectionReference") {
+    require(store, "Collection references require graph/4 context");
+    return store->at(identity(v));
+  }
+  if (type == "string")
+    return Value(string(v));
+  if (type == "class")
+    return Value(Value::Class{identity(v)});
+  if (type == "symbol")
+    return Value(Value::Symbol{string(v)});
+  if (type == "float")
+    return Value(detail::floatFromBits(string(v)));
+  if (type == "reference")
+    return Value(Value::Reference{identity(v)});
+  if (type == "character") {
+    auto text = string(v);
+    auto chars = Value(text).elements();
+    require(chars.size() == 1, "Character requires one Unicode scalar");
+    return chars.front();
+  }
+  if (type == "boolean") {
+    require(v.is_boolean(), "Expected Boolean");
+    return Value(v.get<bool>());
+  }
+  if (type == "integer") {
+    auto s = string(v);
+    std::int64_t i{};
+    auto r = std::from_chars(s.data(), s.data() + s.size(), i);
+    require(r.ec == std::errc{} && r.ptr == s.data() + s.size() &&
+                std::to_string(i) == s,
+            "Unsupported or noncanonical integer");
+    return Value(i);
+  }
+  if (type == "array" || type == "ordered" || type == "set" || type == "bag") {
+    require(v.is_array() && v.size() <= l.items, "Expected bounded array");
+    Value::Array a;
+    for (const auto &e : v)
+      a.push_back(value(e, l, depth + 1, store));
+    if (type == "set") {
+      std::size_t work = 0;
+      std::set<std::string> keys;
+      for (const auto &e : a)
+        require(keys.insert(detail::valueKey(e, l, work)).second,
+                "Duplicate set element");
     }
-    if (type == "string") return Value(string(v));
-    if (type == "class") return Value(Value::Class{identity(v)});
-    if (type == "symbol") return Value(Value::Symbol{string(v)});
-    if (type == "float") return Value(detail::floatFromBits(string(v)));
-    if (type == "reference") return Value(Value::Reference{identity(v)});
-    if (type == "character") {
-        auto text = string(v); auto chars = Value(text).elements();
-        require(chars.size() == 1, "Character requires one Unicode scalar");
-        return chars.front();
-    }
-    if (type == "boolean") { require(v.is_boolean(), "Expected Boolean"); return Value(v.get<bool>()); }
-    if (type == "integer") {
-        auto s = string(v);
-        std::int64_t i{};
-        auto r = std::from_chars(s.data(), s.data() + s.size(), i);
-        require(r.ec == std::errc{} && r.ptr == s.data() + s.size() && std::to_string(i) == s,
-                "Unsupported or noncanonical integer");
-        return Value(i);
-    }
-    if (type == "array" || type == "ordered" || type == "set" || type == "bag") {
-        require(v.is_array() && v.size() <= l.items, "Expected bounded array");
-        Value::Array a;
-        for (const auto& e : v) a.push_back(value(e, l, depth + 1));
-        if (type == "set") {
-            std::size_t work = 0;
-            std::set<std::string> keys;
-            for (const auto& e : a) require(keys.insert(detail::valueKey(e, l, work)).second, "Duplicate set element");
-        }
-        return type == "array" ? Value(std::move(a)) : Value(Value::Collection{type, std::move(a)});
-    }
-    throw Error("Unsupported value type: " + type);
+    return type == "array" ? Value(std::move(a))
+                           : Value(Value::Collection{type, std::move(a)});
+  }
+  throw Error("Unsupported value type: " + type);
 }
-J wire(const Value& v, Limits l, std::size_t depth = 0) {
-    require(depth <= l.depth, "Value depth limit");
-    switch (v.data.index()) {
-    case 12: {
-        auto f = detail::fractionOf(v);
-        return J{{"type", "fraction"},
-                 {"value", J{{"numerator", std::to_string(f.numerator)},
-                             {"denominator", std::to_string(f.denominator)}}}};
-    }
-    case 11:
-        throw Error("Composite conflicts are local objects and cannot be exported");
-    case 0:
-        return J{{"type", "nil"}};
-    case 1:
-        return J{{"type", "boolean"}, {"value", std::get<bool>(v.data)}};
-    case 2:
-        return J{{"type", "integer"}, {"value", std::to_string(std::get<std::int64_t>(v.data))}};
-    case 3:
-        return J{{"type", "string"}, {"value", std::get<std::string>(v.data)}};
-    case 8:
-        return J{{"type", "symbol"}, {"value", std::get<Value::Symbol>(v.data).utf8}};
-    case 9:
-        return J{{"type", "float"}, {"value", detail::floatBits(std::get<double>(v.data))}};
-    case 10: {
-        auto name = std::get<Value::Class>(v.data).name;
-        require(detail::knownClass(name), "Unknown portable class");
-        return J{{"type", "class"}, {"value", name}};
-    }
-        case 5: return J{{"type", "reference"}, {"value", identity(J(std::get<Value::Reference>(v.data).id))}};
-        case 6: {
-            auto text = std::get<Value::Character>(v.data).utf8;
-            require(Value(text).elements().size() == 1, "Character requires one Unicode scalar");
-            return J{{"type", "character"}, {"value", text}};
-        }
-        default: {
-            auto a = J::array();
-            auto type = v.data.index() == 4 ? "array" : std::get<Value::Collection>(v.data).kind;
-            require(type == "array" || type == "ordered" || type == "set" || type == "bag", "Unsupported collection kind");
-            const auto& values = v.data.index() == 4 ? std::get<Value::Array>(v.data) : std::get<Value::Collection>(v.data).elements;
-            require(values.size() <= l.items, "Value item limit");
-            for (const auto& e : values) a.push_back(wire(e, l, depth + 1));
-            return J{{"type", type}, {"value", a}};
-        }
-    }
+struct CollectionWireContext {
+  std::map<std::string, Value> pending;
+  std::map<const void *, std::string> identities;
+};
+J wire(const Value &v, Limits l, std::size_t depth = 0,
+       CollectionWireContext *context = nullptr) {
+  require(depth <= l.depth, "Value depth limit");
+  switch (v.data.index()) {
+  case 13: {
+    require(context,
+            "Mutable collection values require a graph/4 identity context");
+    auto ref = v.mutableCollection();
+    auto ptr = ref->identity();
+    auto known = context->identities.find(ptr);
+    if (known != context->identities.end())
+      return J{{"type", "collectionReference"}, {"value", known->second}};
+    auto id = ref->id(), base = id;
+    std::size_t suffix = 0;
+    while (context->pending.count(id))
+      id = base + "." + std::to_string(++suffix);
+    context->identities[ptr] = id;
+    context->pending.emplace(id, v);
+    return J{{"type", "collectionReference"}, {"value", id}};
+  }
+  case 12: {
+    auto f = detail::fractionOf(v);
+    return J{{"type", "fraction"},
+             {"value", J{{"numerator", std::to_string(f.numerator)},
+                         {"denominator", std::to_string(f.denominator)}}}};
+  }
+  case 11:
+    throw Error("Composite conflicts are local objects and cannot be exported");
+  case 0:
+    return J{{"type", "nil"}};
+  case 1:
+    return J{{"type", "boolean"}, {"value", std::get<bool>(v.data)}};
+  case 2:
+    return J{{"type", "integer"},
+             {"value", std::to_string(std::get<std::int64_t>(v.data))}};
+  case 3:
+    return J{{"type", "string"}, {"value", std::get<std::string>(v.data)}};
+  case 8:
+    return J{{"type", "symbol"},
+             {"value", std::get<Value::Symbol>(v.data).utf8}};
+  case 9:
+    return J{{"type", "float"},
+             {"value", detail::floatBits(std::get<double>(v.data))}};
+  case 10: {
+    auto name = std::get<Value::Class>(v.data).name;
+    require(detail::knownClass(name), "Unknown portable class");
+    return J{{"type", "class"}, {"value", name}};
+  }
+  case 5:
+    return J{{"type", "reference"},
+             {"value", identity(J(std::get<Value::Reference>(v.data).id))}};
+  case 6: {
+    auto text = std::get<Value::Character>(v.data).utf8;
+    require(Value(text).elements().size() == 1,
+            "Character requires one Unicode scalar");
+    return J{{"type", "character"}, {"value", text}};
+  }
+  default: {
+    auto a = J::array();
+    auto type = v.data.index() == 4 ? "array"
+                                    : std::get<Value::Collection>(v.data).kind;
+    require(type == "array" || type == "ordered" || type == "set" ||
+                type == "bag",
+            "Unsupported collection kind");
+    const auto &values = v.data.index() == 4
+                             ? std::get<Value::Array>(v.data)
+                             : std::get<Value::Collection>(v.data).elements;
+    require(values.size() <= l.items, "Value item limit");
+    for (const auto &e : values)
+      a.push_back(wire(e, l, depth + 1, context));
+    return J{{"type", type}, {"value", a}};
+  }
+  }
 }
 J predicateWire(const Predicate &p, Limits l, std::size_t depth = 0) {
     require(depth <= l.depth, "Condition depth limit");
@@ -432,17 +489,37 @@ bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
     }
     if (v.data.index() == 12)
         return ClassRegistry::global().includesBehavior("Fraction", kind);
+    if (v.isMutableCollection()) {
+      auto k = v.mutableCollection()->kind();
+      auto cls = k == "array"     ? "Array"
+                 : k == "ordered" ? "OrderedCollection"
+                 : k == "set"     ? "Set"
+                 : k == "bag"     ? "Bag"
+                                  : "String";
+      return ClassRegistry::global().includesBehavior(cls, kind);
+    }
     static const char* types[]={"UndefinedObject","Boolean","Integer","String","Array",nullptr,"Character",nullptr,"Symbol","Float","Class"};
     auto type=types[v.data.index()];std::string collection;
     if(auto c=std::get_if<Value::Collection>(&v.data)){collection=c->kind=="ordered"?"OrderedCollection":c->kind=="set"?"Set":"Bag";type=collection.c_str();}
     return type && ClassRegistry::global().includesBehavior(type,kind);
 }
 struct Budget {
-    Limits limits; std::size_t work = 0;
-    void tick(std::size_t depth) { require(++work <= limits.visits && depth <= limits.depth, "Validation work/depth limit"); }
+  Limits limits;
+  std::size_t work = 0;
+  std::set<const void *> collections;
+  void tick(std::size_t depth) {
+    require(++work <= limits.visits && depth <= limits.depth,
+            "Validation work/depth limit");
+  }
 };
 void checkReferences(const Value& v, const Graph* graph, Budget& budget, std::size_t depth) {
     budget.tick(depth);
+    if (v.isMutableCollection()) {
+      if (!budget.collections.insert(v.mutableCollection()->identity()).second)
+        return;
+      checkReferences(v.mutableCollection()->snapshot(), graph, budget, depth);
+      return;
+    }
     if (auto r = std::get_if<Value::Reference>(&v.data)) { require(graph, "Object references require a graph resolver"); (void)graph->resolve(*r); }
     if (v.data.index() == 4 || v.data.index() == 7) {
         require(v.collectionSize() <= budget.limits.visits - budget.work, "Collection work limit");
@@ -475,7 +552,9 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
         errors.push_back({d.id, std::move(code), std::move(message)});
     };
     if (d.flag("required") && (v.isNil() || (d.isMultiple() && v.isCollection() && v.collectionSize() == 0))) error("MARequiredError");
-    if (detail::valueKey(v, budget.limits, budget.work) == detail::valueKey(d.property("undefinedValue"), budget.limits, budget.work)) return errors;
+    if (detail::valuesEqual(v, d.property("undefinedValue"), budget.limits,
+                            budget.work))
+      return errors;
     if (d.isContainer()) {
         require(graph, "Container value validation requires a graph resolver");
         require(std::holds_alternative<Value::Reference>(v.data), "Container value requires object reference");
@@ -507,8 +586,16 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
     } else if (d.isOption()) {
         auto check = [&](const Value& e) {
             bool member = false;
-            if (d.options.isDynamic()) { budget.tick(depth); member = d.options.provider()->includes(e, budget.limits); }
-            else for (const auto& option : d.options.values(budget.limits)) { budget.tick(depth); if (detail::valueKey(e, budget.limits, budget.work) == detail::valueKey(option, budget.limits, budget.work)) { member = true; break; } }
+            if (d.options.isDynamic()) { budget.tick(depth); member = d.options.provider()->includes(e, budget.limits);
+            } else
+              for (const auto &option : d.options.values(budget.limits)) {
+                budget.tick(depth);
+                if (detail::valuesEqual(e, option, budget.limits,
+                                        budget.work)) {
+                  member = true;
+                  break;
+                }
+              }
             if (member) return;
             if (!d.flag("extensible")) { error("MAKindError"); kind = false; return; }
             auto nested = validateField(*d.referenceDescription(), e, graph, budget, depth + 1);
@@ -544,7 +631,8 @@ std::vector<ValidationError> validateField(const Description& d, const Value& v,
 }
 }
 std::vector<ValidationError> validateValue(const Description& d, const Value& v, const Graph* graph, Limits l) {
-    Budget budget{l}; return validateField(d, v, graph, budget, 0);
+  Budget budget{l, 0, {}};
+  return validateField(d, v, graph, budget, 0);
 }
 void visit(const Description& root, const std::function<void(const Description&)>& f, Limits l) {
     std::set<const Description*> active, composed, seen;
@@ -571,7 +659,8 @@ void visit(const Description& root, const std::function<void(const Description&)
 std::vector<ValidationError> validate(const Description& root, const Model& model, Limits l, const Graph* graph) {
     std::size_t work=0;
     visit(root, [&](const auto& d) { supported(d); detail::checkPortableDescription(d,l,work); }, l);
-    Budget budget{l,work}; return validateModel(root, model, graph, budget, 0);
+    Budget budget{l, work, {}};
+    return validateModel(root, model, graph, budget, 0);
 }
 Predicate decodePredicate(const std::string& s,Limits l) { try { return predicateValue(parse(s,l),l); } catch(const J::exception& e){throw Error(e.what());} }
 std::string encodePredicate(const Predicate& p,Limits l) { p.check(l);auto s=predicateWire(p,l).dump();(void)decodePredicate(s,l);return s; }
@@ -586,7 +675,16 @@ std::string encodeValue(const Value& v, Limits l) {
 Graph Graph::decode(const std::string& input, Limits l) {
     try {
         auto j = parse(input, l);
-        keys(j, {"format", "root", "descriptions", "objects"});
+        auto header = j;
+        header.erase("collections");
+        header.erase("childCollections");
+        keys(header, {"format", "root", "descriptions", "objects"});
+        if (j.contains("childCollections"))
+          require(j.at("format") == "magritte.graph/4",
+                  "Child collection identity requires graph/4");
+        if (j.contains("collections"))
+          require(j.at("format") == "magritte.graph/4",
+                  "Mutable collections require graph/4");
         require(j.at("format") == "magritte.graph/1" || j.at("format") == "magritte.graph/2" || j.at("format") == "magritte.graph/3" || j.at("format") == "magritte.graph/4", "Unsupported format");
         if(j.at("format")!="magritte.graph/4") {
             std::function<void(const J &)> legacy = [&](const J &node) {
@@ -604,6 +702,33 @@ Graph Graph::decode(const std::string& input, Limits l) {
             legacy(j);
         }
         Graph g; g.format = string(j.at("format")); g.root = identity(j.at("root"));
+        if (j.contains("collections")) {
+          require(j.at("collections").is_array() &&
+                      j.at("collections").size() <= l.nodes,
+                  "Collection table limit");
+          for (const auto &n : j.at("collections")) {
+            keys(n, {"id", "kind", "elements"});
+            require(n.at("elements").is_array() &&
+                        n.at("elements").size() <= l.items,
+                    "Collection element limit");
+            auto kind = string(n.at("kind"));
+            Value::Array placeholders;
+            if (kind == "array")
+              placeholders.resize(n.at("elements").size());
+            if (kind == "string")
+              placeholders.assign(n.at("elements").size(),
+                                  Value(Value::Character{" "}));
+            g.collections.create(kind, identity(n.at("id")), placeholders, l);
+          }
+          for (const auto &n : j.at("collections")) {
+            Value::Array elements;
+            for (const auto &v : n.at("elements"))
+              elements.push_back(value(v, l, 0, &g.collections));
+            g.collections.at(identity(n.at("id")))
+                .mutableCollection()
+                ->setElements(std::move(elements), l);
+          }
+        }
         require(j.at("descriptions").is_array() && j.at("descriptions").size() <= l.nodes, "Description node limit");
         for (const auto& n : j.at("descriptions")) {
             auto d = std::make_shared<Description>();
@@ -615,6 +740,11 @@ Graph Graph::decode(const std::string& input, Limits l) {
             if (n.contains("childrenOrder")) {
                 require(g.format == "magritte.graph/4" && detail::descriptionIs(*d, "MAPriorityContainer") && n.at("childrenOrder") == "stored", "Stored children order requires a graph/4 priority container");
                 shape.erase("childrenOrder");
+            }
+            if (n.contains("childrenCollection")) {
+              require(g.format == "magritte.graph/4" && d->isContainer(),
+                      "Child collection identity requires graph/4 container");
+              shape.erase("childrenCollection");
             }
             if (n.contains("definingContext")) {
                 require(g.format == "magritte.graph/4", "Defining context requires graph/4");
@@ -646,7 +776,8 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 (void)identity(J(it.key()));
                 require(it.key() != "maPrintString" && it.key() != "maPrintStringSeparator",
                         "Print settings are local callable state");
-                d->properties.emplace(it.key(), value(it.value(), l));
+                d->properties.emplace(it.key(),
+                                      value(it.value(), l, 0, &g.collections));
             }
             if (!d->isContainer()) {
                 auto a = accessorValue(n.at("accessor"),l);
@@ -712,13 +843,20 @@ Graph Graph::decode(const std::string& input, Limits l) {
             }
             if (d->isOption()) {
                 require(n.at("options").is_array() && n.at("labels").is_array(), "Expected options and labels arrays");
-                for (const auto& option : n.at("options")) d->options.push_back(value(option, l));
+                for (const auto &option : n.at("options"))
+                  d->options.push_back(value(option, l, 0, &g.collections));
                 std::set<std::string> labelKeys; std::size_t labelWork = 0;
                 for (const auto& label : n.at("labels")) {
-                    keys(label, {"value", "label"}); auto v = value(label.at("value"), l);
-                    require(detail::portableLabelKey(v), "Identity-sensitive option label key is not portable");
-                    require(labelKeys.insert(detail::valueKey(v, l, labelWork)).second, "Duplicate label key");
-                    d->labels.emplace_back(std::move(v), string(label.at("label")));
+                  keys(label, {"value", "label"});
+                  auto v = value(label.at("value"), l, 0, &g.collections);
+                  require(
+                      detail::portableLabelKey(v),
+                      "Identity-sensitive option label key is not portable");
+                  require(labelKeys.insert(detail::valueKey(v, l, labelWork))
+                              .second,
+                          "Duplicate label key");
+                  d->labels.emplace_back(std::move(v),
+                                         string(label.at("label")));
                 }
             }
             supported(*d); detail::checkPortableDescription(*d,l,portableWork);
@@ -737,8 +875,55 @@ Graph Graph::decode(const std::string& input, Limits l) {
                 require(g.format != "magritte.graph/1" || !child->isContainer(), "Nested containers require graph/2");
                 d->children.push_back(child);
             }
-            if (!n.contains("childrenOrder")) d->setChildren(d->children, l);
+            if (!n.contains("childrenOrder"))
+              d->setChildren(d->children.snapshot(), l);
+            else if (detail::descriptionIs(*d, "MAPriorityContainer"))
+              d->children =
+                  DescriptionChildren(d->children.snapshot(), "sorted");
         }
+        std::map<std::string, DescriptionChildren> childCollections;
+        if (j.contains("childCollections")) {
+          require(j.at("childCollections").is_array() &&
+                      j.at("childCollections").size() <= l.nodes,
+                  "Child collection table limit");
+          for (const auto &row : j.at("childCollections")) {
+            keys(row, {"id", "kind", "children"});
+            auto id = identity(row.at("id")), kind = string(row.at("kind"));
+            require(kind == "ordered" || kind == "sorted" || kind == "array",
+                    "Unsupported child collection kind");
+            require(row.at("children").is_array() &&
+                        row.at("children").size() <= l.items,
+                    "Child collection item limit");
+            DescriptionChildren::Native values;
+            for (const auto &v : row.at("children")) {
+              auto c = identity(v);
+              require(g.descriptions.count(c), "Dangling child identity");
+              values.push_back(g.descriptions.at(c));
+            }
+            require(
+                childCollections.emplace(id, DescriptionChildren(values, kind))
+                    .second,
+                "Duplicate child collection identity");
+          }
+        }
+        std::set<std::string> usedChildren;
+        for (const auto &row : j.at("descriptions"))
+          if (row.contains("childrenCollection")) {
+            auto id = identity(row.at("childrenCollection"));
+            require(childCollections.count(id),
+                    "Dangling child collection identity");
+            auto d = g.descriptions.at(identity(row.at("id")));
+            require(d->children.snapshot() ==
+                        childCollections.at(id).snapshot(),
+                    "Child collection snapshot mismatch");
+            require(!detail::descriptionIs(*d, "MAPriorityContainer") ||
+                        childCollections.at(id).kind() == "sorted",
+                    "Priority children require sorted storage");
+            d->children = childCollections.at(id);
+            usedChildren.insert(id);
+          }
+        require(usedChildren.size() == childCollections.size(),
+                "Unreferenced child collection");
         require(g.descriptions.count(g.root) && g.descriptions.at(g.root)->isContainer(), "Root must identify a container");
         std::set<const Description*> checked;
         std::size_t graphWork = 0;
@@ -754,12 +939,23 @@ Graph Graph::decode(const std::string& input, Limits l) {
             for (const auto& d : m.description->children) fields.insert(d->id);
             for (auto it = o.at("values").begin(); it != o.at("values").end(); ++it) {
                 require(fields.count(it.key()), "Value is not described by the object container");
-                m.values.emplace(it.key(), value(it.value(), l));
+                m.values.emplace(it.key(),
+                                 value(it.value(), l, 0, &g.collections));
             }
             require(g.objects.emplace(m.id, std::move(m)).second, "Duplicate object identity");
         }
+        std::set<const void *> referencedCollections;
         std::function<void(const Value&, std::size_t)> references = [&](const auto& v, auto depth) {
             require(depth <= l.depth && ++graphWork <= l.visits, "Value reference traversal limit");
+            if (v.isMutableCollection()) {
+              require(g.format == "magritte.graph/4",
+                      "Mutable collections require graph/4");
+              if (referencedCollections
+                      .insert(v.mutableCollection()->identity())
+                      .second)
+                references(v.mutableCollection()->snapshot(), depth);
+              return;
+            }
             if (auto r = std::get_if<Value::Reference>(&v.data)) { require(g.format != "magritte.graph/1", "Object references require graph/2"); (void)g.resolve(*r); }
             if(v.data.index()==10) require(g.format=="magritte.graph/4", "Class values require graph/4");
             if (v.data.index() == 8 || v.data.index() == 9) require(g.format >= "magritte.graph/3", "Symbol/Float requires graph/3");
@@ -772,12 +968,55 @@ Graph Graph::decode(const std::string& input, Limits l) {
             for (const auto& label : p.second->labels) references(label.first, 0);
         }
         for (const auto& o : g.objects) for (const auto& v : o.second.values) references(v.second, 0);
+        if (j.contains("collections"))
+          for (const auto &n : j.at("collections"))
+            references(g.collections.at(identity(n.at("id"))), 0);
         return g;
     } catch (const J::exception& e) { throw Error(e.what()); }
 }
 std::string Graph::encode(Limits l) const {
     try {
         require(nativeObjects.empty(), "Local native object bindings are not portable");
+        CollectionWireContext collectionContext;
+        std::map<const void *, std::vector<const Description *>> childGroups;
+        require(descriptions.size() <= l.nodes && objects.size() <= l.nodes,
+                "Graph node limit");
+        for (const auto &p : descriptions)
+          require(bool(p.second) && p.first == p.second->id,
+                  "Inconsistent description identity");
+        for (const auto &p : descriptions)
+          if (p.second->isContainer())
+            childGroups[p.second->children.storage().get()].push_back(
+                p.second.get());
+        std::map<const void *, std::string> childIDs;
+        J childRows = J::array();
+        for (const auto &p : descriptions)
+          if (p.second->isContainer()) {
+            const auto &d = *p.second;
+            auto ptr = d.children.storage().get();
+            auto kind = d.children.kind();
+            require(kind == "ordered" || kind == "sorted" || kind == "array",
+                    "Unsupported child collection kind");
+            if (detail::descriptionIs(d, "MAPriorityContainer"))
+              kind = "sorted";
+            bool needed = childGroups.at(ptr).size() > 1 || kind == "array" ||
+                          (kind == "sorted" &&
+                           !detail::descriptionIs(d, "MAPriorityContainer"));
+            if (needed && !childIDs.count(ptr)) {
+              require(format == "magritte.graph/4",
+                      "Shared child collections require graph/4");
+              auto id = "children." + p.first;
+              childIDs[ptr] = id;
+              J children = J::array();
+              for (const auto &c : d.children) {
+                require(bool(c), "Null container child");
+                children.push_back(c->id);
+              }
+              childRows.push_back(
+                  J{{"id", id}, {"kind", kind}, {"children", children}});
+            }
+          }
+
         J j{{"format", format}, {"root", root}, {"descriptions", J::array()}, {"objects", J::array()}};
         require(descriptions.size() <= l.nodes && objects.size() <= l.nodes, "Graph node limit");
         std::size_t portableWork=0;
@@ -804,7 +1043,9 @@ std::string Graph::encode(Limits l) const {
                                                    : Value(),
                             l)}};
             }
-            for (const auto& prop : d.properties) n["properties"][prop.first] = wire(prop.second, l);
+            for (const auto &prop : d.properties)
+              n["properties"][prop.first] =
+                  wire(prop.second, l, 0, &collectionContext);
             if (format >= "magritte.graph/3") {
                 n["conditions"] = J::array();
                 for(const auto& c:d.portableConditions)n["conditions"].push_back(J{{"label",c.label},{"predicate",predicateWire(c.predicate,l)}});
@@ -816,6 +1057,9 @@ std::string Graph::encode(Limits l) const {
                     else for (std::size_t i = 1; i < d.children.size(); ++i)
                         require(detail::compareNumbers(d.children[i-1]->priorityValue(), d.children[i]->priorityValue()) <= 0, "Stale priority order requires graph/4");
                 }
+                if (childIDs.count(d.children.storage().get()))
+                  n["childrenCollection"] =
+                      childIDs.at(d.children.storage().get());
                 n["children"] = J::array();
                 for (const auto& c : d.children) {
                     require(c && descriptions.count(c->id) && descriptions.at(c->id) == c, "Unregistered child identity");
@@ -835,7 +1079,9 @@ std::string Graph::encode(Limits l) const {
             if (d.isRelation()) n["classes"] = d.classes;
             if (d.isOption()) {
                 n["options"] = J::array(); n["labels"] = J::array();
-                for (const auto& option : d.options.values(l)) n["options"].push_back(wire(option, l));
+                for (const auto &option : d.options.values(l))
+                  n["options"].push_back(
+                      wire(option, l, 0, &collectionContext));
                 for (const auto& label : d.labels) n["labels"].push_back(J{{"value", wire(label.first, l)}, {"label", label.second}});
             }
             j["descriptions"].push_back(n);
@@ -844,8 +1090,34 @@ std::string Graph::encode(Limits l) const {
             const auto& m = p.second;
             require(p.first == m.id && m.description && descriptions.count(m.description->id) && descriptions.at(m.description->id) == m.description, "Unregistered object description");
             J o{{"id", m.id}, {"description", m.description->id}, {"values", J::object()}};
-            for (const auto& v : m.values) o["values"][v.first] = wire(v.second, l);
+            for (const auto &v : m.values)
+              o["values"][v.first] = wire(v.second, l, 0, &collectionContext);
             j["objects"].push_back(o);
+        }
+        if (!childRows.empty())
+          j["childCollections"] = childRows;
+        if (!collectionContext.pending.empty()) {
+          require(format == "magritte.graph/4",
+                  "Mutable collections require graph/4");
+          std::map<std::string, J> rows;
+          while (rows.size() < collectionContext.pending.size()) {
+            require(collectionContext.pending.size() <= l.nodes,
+                    "Collection node limit");
+            auto i = std::find_if(
+                collectionContext.pending.begin(),
+                collectionContext.pending.end(),
+                [&](const auto &p) { return !rows.count(p.first); });
+            auto ref = i->second.mutableCollection();
+            J elements = J::array();
+            for (const auto &v : ref->snapshot().elements())
+              elements.push_back(wire(v, l, 0, &collectionContext));
+            rows[i->first] = J{{"id", i->first},
+                               {"kind", ref->kind()},
+                               {"elements", elements}};
+          }
+          j["collections"] = J::array();
+          for (const auto &row : rows)
+            j["collections"].push_back(row.second);
         }
         auto s = j.dump(2); (void)Graph::decode(s, l); return s;
     } catch (const J::exception& e) { throw Error(e.what()); }

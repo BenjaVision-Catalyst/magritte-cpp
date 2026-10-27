@@ -15,6 +15,12 @@
 namespace magritte {
 // Portable numbers are Int64, finite binary64, and normalized bounded exact fractions.
 struct CompositeConflict;
+struct Limits;
+class CollectionReference;
+class CollectionStore;
+namespace detail {
+struct CollectionStorage;
+}
 struct Value {
     struct Fraction {
         std::int64_t numerator, denominator;
@@ -25,8 +31,10 @@ struct Value {
     struct Symbol { std::string utf8; };
     struct Collection { std::string kind; std::vector<Value> elements; };
     using Array = std::vector<Value>;
-    std::variant<std::monostate, bool, std::int64_t, std::string, Array, Reference, Character,
-                 Collection, Symbol, double, Class, std::shared_ptr<CompositeConflict>, Fraction>
+    std::variant<std::monostate, bool, std::int64_t, std::string, Array,
+                 Reference, Character, Collection, Symbol, double, Class,
+                 std::shared_ptr<CompositeConflict>, Fraction,
+                 std::shared_ptr<CollectionReference>>
         data;
     Value() = default;
     explicit Value(bool v) : data(v) {}
@@ -42,6 +50,12 @@ struct Value {
     explicit Value(Class v);
     explicit Value(Fraction);
     explicit Value(std::shared_ptr<CompositeConflict>);
+    explicit Value(std::shared_ptr<CollectionReference>);
+    std::shared_ptr<CollectionReference> mutableCollection() const;
+    bool isMutableCollection() const { return data.index() == 13; }
+    bool sameCollection(const Value &) const;
+    Value shallowCopy() const;
+    Value shallowCopy(const Limits &) const;
     std::shared_ptr<CompositeConflict> conflict() const;
     bool isCollection() const;
     Array elements() const;
@@ -55,6 +69,46 @@ struct Limits {
     std::size_t bytes = 1024 * 1024, depth = 64, nodes = 10000,
                 items = 100000, visits = 100000;
 };
+// Native collection graph ownership. Root values retain the arena; stored links
+// are weak.
+class CollectionReference {
+  std::shared_ptr<detail::CollectionStorage> owner_;
+  std::weak_ptr<detail::CollectionStorage> storage_;
+  std::string id_;
+  CollectionReference(std::shared_ptr<detail::CollectionStorage>, std::string,
+                      bool);
+  friend class CollectionStore;
+
+public:
+  std::shared_ptr<detail::CollectionStorage> storage() const;
+  const std::string &id() const { return id_; }
+  const void *identity() const;
+  std::string kind() const;
+  Value retained() const;
+  Value borrowed() const;
+  Value snapshot() const;
+  Value shallowCopy(Limits = {}) const;
+  void setElements(Value::Array, Limits = {});
+  void append(Value, Limits = {});
+  void atPut(std::size_t, Value, Limits = {});
+  void remove(const Value &, Limits = {});
+  void clear(Limits = {});
+};
+class CollectionStore {
+  std::shared_ptr<detail::CollectionStorage> state_;
+  explicit CollectionStore(std::shared_ptr<detail::CollectionStorage>);
+  friend class CollectionReference;
+
+public:
+  CollectionStore();
+  Value create(std::string kind, std::string id = {}, Value::Array = {},
+               Limits = {});
+  Value string(std::string id, std::string text, Limits = {});
+  Value at(const std::string &) const;
+  bool contains(const std::string &) const;
+  bool owns(const Value &) const;
+};
+bool valuesEqual(const Value &, const Value &, Limits = {});
 // Runtime class identities and single-inheritance relationships, analogous to an image's class environment.
 struct ClassInfo {
     std::string name, superclass;
@@ -252,6 +306,68 @@ namespace detail {
 void copyReferenceStorage(Description &, const Description &, std::shared_ptr<Description>);
 }
 using RelationCommonClass = std::variant<Value::Class, std::shared_ptr<Description>>;
+// Reference identity around native vector storage. Copies alias; snapshot()
+// copies the vector.
+class DescriptionChildren {
+public:
+  using Native = std::vector<std::shared_ptr<Description>>;
+  struct Storage {
+    Native values;
+    std::string kind = "ordered";
+  };
+
+private:
+  std::shared_ptr<Storage> storage_ = std::make_shared<Storage>();
+
+public:
+  DescriptionChildren() = default;
+  DescriptionChildren(Native values, std::string kind = "ordered")
+      : storage_(std::make_shared<Storage>(
+            Storage{std::move(values), std::move(kind)})) {}
+  DescriptionChildren &operator=(Native values) {
+    storage_->values = std::move(values);
+    return *this;
+  }
+  DescriptionChildren &
+  operator=(std::initializer_list<std::shared_ptr<Description>> values) {
+    return *this = Native(values);
+  }
+  const std::shared_ptr<Storage> &storage() const { return storage_; }
+  Native snapshot() const { return storage_->values; }
+  const std::string &kind() const { return storage_->kind; }
+  operator const Native &() const { return storage_->values; }
+  operator Native &() { return storage_->values; }
+  auto begin() { return storage_->values.begin(); }
+  auto end() { return storage_->values.end(); }
+  auto begin() const { return storage_->values.begin(); }
+  auto end() const { return storage_->values.end(); }
+  auto size() const { return storage_->values.size(); }
+  bool empty() const { return storage_->values.empty(); }
+  auto &operator[](std::size_t i) { return storage_->values[i]; }
+  const auto &operator[](std::size_t i) const { return storage_->values[i]; }
+  auto &front() { return storage_->values.front(); }
+  const auto &front() const { return storage_->values.front(); }
+  auto &back() { return storage_->values.back(); }
+  const auto &back() const { return storage_->values.back(); }
+  void push_back(std::shared_ptr<Description> d) {
+    storage_->values.push_back(std::move(d));
+  }
+  auto insert(Native::iterator i, std::shared_ptr<Description> d) {
+    return storage_->values.insert(i, std::move(d));
+  }
+  auto erase(Native::iterator i) { return storage_->values.erase(i); }
+  void clear() { storage_->values.clear(); }
+  void pop_back() { storage_->values.pop_back(); }
+  auto &at(std::size_t i) { return storage_->values.at(i); }
+  const auto &at(std::size_t i) const { return storage_->values.at(i); }
+  friend bool operator==(const DescriptionChildren &a,
+                         const DescriptionChildren &b) {
+    return a.storage_->values == b.storage_->values;
+  }
+  friend bool operator==(const DescriptionChildren &a, const Native &b) {
+    return a.storage_->values == b;
+  }
+};
 struct Description : Model, std::enable_shared_from_this<Description> {
   private:
     mutable std::optional<Accessor> defaultNullAccessor_;
@@ -275,7 +391,7 @@ struct Description : Model, std::enable_shared_from_this<Description> {
     void display(std::shared_ptr<DisplayBlock>);
     std::string displayStringFor(const Value &, const Graph * = nullptr, Limits = {}) const;
     std::map<std::string, Value> properties;
-    std::vector<std::shared_ptr<Description>> children;
+    DescriptionChildren children;
     // Graph owns descriptions. Non-owning reference edges permit recursive models.
     mutable std::weak_ptr<Description> reference;
     std::vector<std::string> classes;
@@ -345,6 +461,12 @@ struct Description : Model, std::enable_shared_from_this<Description> {
     Value priorityValue() const;
     // Raw children is stored order; use source-shaped operations for construction/mutation.
     Description &setChildren(std::vector<std::shared_ptr<Description>>, Limits = {});
+    Description &setChildren(const DescriptionChildren &, Limits = {});
+    Description &
+    setChildren(std::initializer_list<std::shared_ptr<Description>> v,
+                Limits l = {}) {
+      return setChildren(std::vector<std::shared_ptr<Description>>(v), l);
+    }
     Description &add(std::shared_ptr<Description>, Limits = {});
     Description &addAll(std::vector<std::shared_ptr<Description>>, Limits = {});
     Description &remove(const Description &, Limits = {});
@@ -416,6 +538,7 @@ struct Graph {
     Model& resolve(const Value&);
     std::map<std::string, std::shared_ptr<Description>> descriptions;
     std::map<std::string, AdaptiveModel> objects;
+    CollectionStore collections;
     static Graph decode(const std::string&, Limits = {});
     std::string encode(Limits = {}) const;
 };

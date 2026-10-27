@@ -23,6 +23,10 @@ Value::Fraction fractionOf(const Value &);
 std::optional<Value::Fraction> floatFraction(double);
 int compareFractions(const Value &, const Value &);
 Value flattenedPriority(const Value &parent, const Value &child);
+bool valuesEqual(const Value &, const Value &, Limits, std::size_t &,
+                 std::size_t depth = 0);
+void checkRuntimeValue(const Value &, Limits, std::size_t &,
+                       std::size_t depth = 0);
 void checkLocalValue(const Value &, Limits = {});
 std::string validationMessage(const Description &, const std::string &code, Limits = {});
 std::string displayString(const Value&);

@@ -8,37 +8,63 @@ namespace magritte {
 Value::Value(Class v):data(std::move(v)){if(!detail::knownClass(std::get<Class>(data).name))throw Error("Unknown portable class");}
 
 Value::Value(double v) : data(v) { if (!std::isfinite(v)) throw Error("Non-finite float"); }
-bool Value::isCollection() const { return data.index() == 3 || data.index() == 4 || data.index() == 7 || data.index() == 8; }
+bool Value::isCollection() const {
+  return data.index() == 13 || data.index() == 3 || data.index() == 4 ||
+         data.index() == 7 || data.index() == 8;
+}
 std::size_t Value::collectionSize() const {
-    if (auto a = std::get_if<Array>(&data)) return a->size();
-    if (auto c = std::get_if<Collection>(&data)) return c->elements.size();
-    if (auto s = std::get_if<Symbol>(&data)) return Value(s->utf8).collectionSize();
-    if (auto s = std::get_if<std::string>(&data)) return static_cast<std::size_t>(std::count_if(s->begin(), s->end(), [](unsigned char c) { return (c & 0xc0) != 0x80; }));
-    throw Error("Value is not a collection");
+  if (isMutableCollection())
+    return mutableCollection()->snapshot().collectionSize();
+  if (auto a = std::get_if<Array>(&data))
+    return a->size();
+  if (auto c = std::get_if<Collection>(&data))
+    return c->elements.size();
+  if (auto s = std::get_if<Symbol>(&data))
+    return Value(s->utf8).collectionSize();
+  if (auto s = std::get_if<std::string>(&data))
+    return static_cast<std::size_t>(
+        std::count_if(s->begin(), s->end(),
+                      [](unsigned char c) { return (c & 0xc0) != 0x80; }));
+  throw Error("Value is not a collection");
 }
 Value::Array Value::elements() const {
-    if (auto a = std::get_if<Array>(&data)) return *a;
-    if (auto s = std::get_if<Symbol>(&data)) return Value(s->utf8).elements();
-    if (auto c = std::get_if<Collection>(&data)) return c->elements;
-    if (auto s = std::get_if<std::string>(&data)) {
-        Array result;
-        for (std::size_t i = 0; i < s->size();) {
-            auto c = static_cast<unsigned char>((*s)[i]);
-            auto n = c < 128 ? 1U : (c >= 0xc2 && c <= 0xdf) ? 2U : (c >= 0xe0 && c <= 0xef) ? 3U : (c >= 0xf0 && c <= 0xf4) ? 4U : 0U;
-            if (n == 0) throw Error("Invalid UTF-8 collection");
-            if (i + n > s->size()) throw Error("Invalid UTF-8 collection");
-            for (unsigned j = 1; j < n; ++j) {
-                auto byte = static_cast<unsigned char>((*s)[i+j]);
-                if (byte < 0x80 || byte > 0xbf) throw Error("Invalid UTF-8 collection");
-            }
-            if (n > 1) {
-                auto next = static_cast<unsigned char>((*s)[i+1]);
-                if ((c == 0xe0 && next < 0xa0) || (c == 0xed && next >= 0xa0) || (c == 0xf0 && next < 0x90) || (c == 0xf4 && next >= 0x90)) throw Error("Invalid Unicode scalar");
-            }
-            result.emplace_back(Character{s->substr(i, n)}); i += n;
-        }
-        return result;
+  if (isMutableCollection())
+    return mutableCollection()->snapshot().elements();
+  if (auto a = std::get_if<Array>(&data))
+    return *a;
+  if (auto s = std::get_if<Symbol>(&data))
+    return Value(s->utf8).elements();
+  if (auto c = std::get_if<Collection>(&data))
+    return c->elements;
+  if (auto s = std::get_if<std::string>(&data)) {
+    Array result;
+    for (std::size_t i = 0; i < s->size();) {
+      auto c = static_cast<unsigned char>((*s)[i]);
+      auto n = c < 128                    ? 1U
+               : (c >= 0xc2 && c <= 0xdf) ? 2U
+               : (c >= 0xe0 && c <= 0xef) ? 3U
+               : (c >= 0xf0 && c <= 0xf4) ? 4U
+                                          : 0U;
+      if (n == 0)
+        throw Error("Invalid UTF-8 collection");
+      if (i + n > s->size())
+        throw Error("Invalid UTF-8 collection");
+      for (unsigned j = 1; j < n; ++j) {
+        auto byte = static_cast<unsigned char>((*s)[i + j]);
+        if (byte < 0x80 || byte > 0xbf)
+          throw Error("Invalid UTF-8 collection");
+      }
+      if (n > 1) {
+        auto next = static_cast<unsigned char>((*s)[i + 1]);
+        if ((c == 0xe0 && next < 0xa0) || (c == 0xed && next >= 0xa0) ||
+            (c == 0xf0 && next < 0x90) || (c == 0xf4 && next >= 0x90))
+          throw Error("Invalid Unicode scalar");
+      }
+      result.emplace_back(Character{s->substr(i, n)});
+      i += n;
     }
+    return result;
+  }
     throw Error("Value is not a collection");
 }
 namespace detail {
@@ -59,6 +85,8 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
     };
     std::string result = std::to_string(v.data.index()) + ":";
     switch (v.data.index()) {
+    case 13:
+      return valueKey(v.mutableCollection()->snapshot(), l, work, depth + 1);
     case 12: {
         auto f = detail::fractionOf(v);
         if (f.denominator == 1)
@@ -108,7 +136,7 @@ std::string valueKey(const Value& v, Limits l, std::size_t& work, std::size_t de
 bool Value::operator==(const Value& v) const {
     std::size_t work = 0;
     Limits local; local.visits = static_cast<std::size_t>(-1); local.depth = static_cast<std::size_t>(-1);
-    return detail::valueKey(*this, local, work) == detail::valueKey(v, local, work);
+    return detail::valuesEqual(*this, v, local, work);
 }
 bool Description::isRelation() const { return detail::descriptionIs(*this, "MARelationDescription"); }
 bool Description::isOption() const { return detail::descriptionIs(*this, "MAOptionDescription"); }
@@ -118,7 +146,7 @@ bool Description::isMultiple() const {
            detail::descriptionIs(*this, "MAMultipleOptionDescription");
 }
 std::string Description::labelForOption(const Value &v, Limits l, const Graph *graph) const {
-    std::size_t work = 0; auto key = detail::valueKey(v, l, work);
+    std::size_t work = 0; detail::checkRuntimeValue(v, l, work);
     auto bounded = [&](const std::string& text) {
         if (text.size() > l.bytes || work > l.visits || text.size() > l.visits - work) throw Error("Option label output limit");
         work += text.size(); return text;
@@ -130,7 +158,7 @@ std::string Description::labelForOption(const Value &v, Limits l, const Graph *g
     if (!isOption()) throw Error("Option operation requires option description");
     for (const auto& label : labels) {
         if (!detail::portableLabelKey(label.first)) throw Error("Identity-sensitive option label key is not portable");
-        if (label.first.data.index() == v.data.index() && detail::valueKey(label.first, l, work) == key) return bounded(label.second);
+        if (label.first.data.index() == v.data.index() && detail::valuesEqual(label.first,v,l,work)) return bounded(label.second);
     }
     return bounded(displayStringFor(v, graph, l));
 }
@@ -150,8 +178,8 @@ Options Description::allOptionsWith(const Value &current, Limits l, const Graph 
         return Options::collection(std::move(items));
     }
     std::size_t work = 0;
-    bool contains = false; auto key = detail::valueKey(current, l, work);
-    for (const auto& option : options.values(l)) if (detail::valueKey(option, l, work) == key) contains = true;
+    bool contains = false; detail::checkRuntimeValue(current,l,work);
+    for (const auto& option : options.values(l)) if (detail::valuesEqual(option,current,l,work)) contains = true;
     auto result = options.values(l);
     if (flag("extensible") && !current.isNil() && !contains) result.push_back(current);
     if (flag("sorted")) {

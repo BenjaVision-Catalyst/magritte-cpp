@@ -9,7 +9,7 @@ struct Work {
             throw Error("Model protocol work limit");
     }
     void value(const Value &v) {
-        (void)detail::valueKey(v, limits, count);
+        detail::checkRuntimeValue(v, limits, count);
         detail::checkLocalValue(v, limits);
     }
     bool equal(const Value &left, const Value &right, const Graph *graph) {
@@ -24,9 +24,7 @@ struct Work {
                 throw Error("Model equality message must return Boolean");
             return *boolean;
         }
-        auto a = detail::valueKey(left, limits, count);
-        auto b = detail::valueKey(right, limits, count);
-        return a == b;
+        return detail::valuesEqual(left,right,limits,count);
     }
 };
 Value declaredDefault(const Description &d, Work &work) {

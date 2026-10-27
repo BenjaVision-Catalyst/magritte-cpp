@@ -45,6 +45,14 @@ struct Work {
             return false;
         if (!a.isContainer())
             return true;
+        auto leftKind = detail::descriptionIs(a, "MAPriorityContainer")
+                            ? "sorted"
+                            : a.children.kind();
+        auto rightKind = detail::descriptionIs(b, "MAPriorityContainer")
+                             ? "sorted"
+                             : b.children.kind();
+        if (leftKind != rightKind)
+          return false;
         auto x = a.orderedChildren(), y = b.orderedChildren();
         if (x.size() != y.size())
             return false;
@@ -76,7 +84,7 @@ void retain(DescriptionCopy &result, const std::shared_ptr<Description> &source,
             detail::checkDescription(d);
             detail::checkPortableDescription(d, l, count);
             for (const auto &p : d.properties)
-                (void)detail::valueKey(p.second, l, count);
+              detail::checkRuntimeValue(p.second, l, count);
         },
         l);
     walk(source);
@@ -118,7 +126,10 @@ DescriptionCopy copy(std::shared_ptr<Description> source, const std::string &id,
                 throw Error("Recursive reference postCopy is unsupported; copy is not a graph deep clone");
             auto n = std::make_shared<Description>(*d);
             n->id = nextId;
-            if (n->isContainer()) n->setChildren(d->children, l);
+            if (n->isContainer())
+              n->setChildren(DescriptionChildren(d->children.snapshot(),
+                                                 d->children.kind()),
+                             l);
             if (d->isOption()) n->options = d->options.copy();
             if(d->accessorObject){n->accessorObject=AccessorObject::fromAccessor(nextId+".accessor",d->accessorObject->snapshot(l),l);n->accessor.reset();}
             result.retained.push_back(n);

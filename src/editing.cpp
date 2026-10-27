@@ -12,7 +12,7 @@ struct Work {
             throw Error("Editing work limit");
     }
     bool equal(const Value &a, const Value &b) {
-        return detail::valueKey(a, limits, count) == detail::valueKey(b, limits, count);
+      return detail::valuesEqual(a, b, limits, count);
     }
 };
 bool ignorable(const Description &d, const Value &value, Work &work) {
@@ -97,7 +97,7 @@ Value StraightMemento::readUsing(const Description &d) const {
     if (value.isNil())
         value = d.defaultValue();
     Work work{limits_};
-    (void)detail::valueKey(value, limits_, work.count);
+    detail::checkRuntimeValue(value, limits_, work.count);
     return value;
 }
 void StraightMemento::writeUsing(const Description &d, Value value) {
@@ -118,7 +118,7 @@ CachedMemento::Values CachedMemento::pullRaw() const {
     for (const auto &d : fields()) {
         work.tick();
         auto value = model_.readUsing(*d);
-        (void)detail::valueKey(value, limits_, work.count);
+        detail::checkRuntimeValue(value, limits_, work.count);
         values.emplace(d->id, std::move(value));
     }
     return values;
@@ -161,8 +161,8 @@ void CachedMemento::writeUsing(const Description &d, Value value) {
     Work work{limits_};
     for (const auto &p : cache_)
         if (p.first != d.id)
-            (void)detail::valueKey(p.second.value, limits_, work.count);
-    (void)detail::valueKey(value, limits_, work.count);
+          detail::checkRuntimeValue(p.second.value, limits_, work.count);
+    detail::checkRuntimeValue(value, limits_, work.count);
     auto i = cache_.find(d.id);
     if (i != cache_.end()) {
         if (i->second.description.get() != &d)
@@ -188,7 +188,7 @@ void CachedMemento::reset() {
         auto value = model_.readUsing(*d);
         if (work.equal(value, d->property("undefinedValue")))
             value = d->defaultValue();
-        (void)detail::valueKey(value, limits_, work.count);
+        detail::checkRuntimeValue(value, limits_, work.count);
         next.emplace(d->id, Entry{d, std::move(value)});
         order.push_back(d->id);
     }
@@ -220,7 +220,13 @@ CheckedMemento::CheckedMemento(Model &m, std::shared_ptr<Description> d, const G
 }
 void CheckedMemento::reset() {
     CachedMemento::reset();
-    original_ = pullRaw();
+    auto next = pullRaw();
+    for (const auto &d : fields()) {
+      auto &value = next.at(d->id);
+      if (value.isCollection() && d->isReference() && d->isMultiple())
+        value = value.shallowCopy(limits_);
+    }
+    original_=std::move(next);
 }
 bool CheckedMemento::hasModelChangedElsewhere() const {
     checkIdentities();

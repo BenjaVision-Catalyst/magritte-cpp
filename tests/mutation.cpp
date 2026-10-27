@@ -136,11 +136,13 @@ int main(int argc, char **argv) {
     check(ids(*root) == J::array({"b", "c", "a"}));
     b->properties["priority"] = Value(std::int64_t(50));
     auto previous = ids(*root);
+    auto previousStorage=root->children.storage();
     fails([&] {
       binding->writeUsing(*children,
                           Value(Value::Array{Value(Value::Reference{"root"})}));
     });
     check(ids(*root) == previous);
+    check(root->children.storage()==previousStorage,"Metadata rollback preserves backing identity");
     root->setChildren({a, b, c});
     b->properties["priority"] = Value(std::int64_t(5));
     root->add(c);

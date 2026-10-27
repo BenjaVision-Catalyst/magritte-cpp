@@ -101,13 +101,34 @@ Description &Description::setChildren(std::vector<std::shared_ptr<Description>> 
     containerWork(*this, next.size(), limits);
     for (const auto &d : next) if (!d) throw Error("Null container child");
     if (detail::descriptionIs(*this, "MAPriorityContainer")) sortChildren(next, limits);
-    children = std::move(next);
+    children = DescriptionChildren(
+        std::move(next), detail::descriptionIs(*this, "MAPriorityContainer")
+                             ? "sorted"
+                             : "ordered");
     return *this;
+}
+Description &Description::setChildren(const DescriptionChildren &next,
+                                      Limits limits) {
+  if (detail::descriptionIs(*this, "MAPriorityContainer"))
+    return setChildren(next.snapshot(), limits);
+  containerWork(*this, next.size(), limits);
+  for (const auto &d : next)
+    if (!d)
+      throw Error("Null container child");
+  if (next.kind() != "ordered" && next.kind() != "sorted" &&
+      next.kind() != "array")
+    throw Error("Unsupported child collection kind");
+  children = next;
+  return *this;
 }
 Description &Description::add(std::shared_ptr<Description> child, Limits limits) {
     containerWork(*this, children.size() + 1, limits);
     if (!child) throw Error("Null container child");
-    if (!detail::descriptionIs(*this, "MAPriorityContainer")) children.push_back(std::move(child));
+    if (children.kind() == "array")
+      throw Error("Array children have fixed size");
+    if (children.kind() != "sorted" &&
+        !detail::descriptionIs(*this, "MAPriorityContainer"))
+      children.push_back(std::move(child));
     else {
         // Pharo SortedCollection>>indexForInserting:, also for stale stored priorities.
         std::size_t low = 0, high = children.size(), work = children.size();
@@ -123,22 +144,33 @@ Description &Description::add(std::shared_ptr<Description> child, Limits limits)
     return *this;
 }
 Description &Description::addAll(std::vector<std::shared_ptr<Description>> incoming, Limits limits) {
-    if (incoming.size() > limits.items || children.size() > limits.items - incoming.size()) throw Error("Container mutation item/work limit");
-    containerWork(*this, children.size() + incoming.size(), limits);
-    if (detail::descriptionIs(*this, "MAPriorityContainer") && incoming.size() > children.size() / 3) {
-        for (const auto &d : incoming) {
-            if (!d) throw Error("Null container child");
-            children.push_back(d);
-        }
-        // Bulk insertion has already happened if conversion/comparison fails.
-        auto next = children;
-        sortChildren(next, limits);
-        children = std::move(next);
-    } else for (const auto &d : incoming) add(d, limits);
-    return *this;
+  if (children.kind() == "array" && !incoming.empty())
+    throw Error("Array children have fixed size");
+  if (incoming.size() > limits.items ||
+      children.size() > limits.items - incoming.size())
+    throw Error("Container mutation item/work limit");
+  containerWork(*this, children.size() + incoming.size(), limits);
+  if ((children.kind() == "sorted" ||
+       detail::descriptionIs(*this, "MAPriorityContainer")) &&
+      incoming.size() > children.size() / 3) {
+    for (const auto &d : incoming) {
+      if (!d)
+        throw Error("Null container child");
+      children.push_back(d);
+    }
+    // Bulk insertion has already happened if conversion/comparison fails.
+    auto next = children.snapshot();
+    sortChildren(next, limits);
+    children.storage()->values = std::move(next);
+  } else
+    for (const auto &d : incoming)
+      add(d, limits);
+  return *this;
 }
 Description &Description::remove(const Description &sought, Limits limits) {
     containerWork(*this, children.size(), limits);
+    if (children.kind() == "array")
+      throw Error("Array children have fixed size");
     if (auto index = detail::firstEqualChild(children, sought, limits)) {
         children.erase(children.begin() + *index);
         return *this;
