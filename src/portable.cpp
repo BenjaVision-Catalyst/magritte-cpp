@@ -1022,3 +1022,15 @@ bool Description::isObfuscated(const Value &v) const {
     return s && !s->empty() && std::all_of(s->begin(), s->end(), [](char c) { return c == '*'; });
 }
 } // namespace magritte
+
+namespace magritte::detail {
+bool evaluateModelPredicate(const Predicate &p,const Model &model,const Graph *graph,Limits limits,std::size_t &work){
+ p.check(limits);if(++work>limits.visits)throw Error("Model condition work limit");
+ if(p.className=="MANegationCondition")return !evaluateModelPredicate(p.children.front(),model,graph,limits,work);
+ if(p.className=="MAConjunctiveCondition"){for(auto &c:p.children)if(!evaluateModelPredicate(c,model,graph,limits,work))return false;return true;}
+ if(p.index!=0)throw Error("Portable model conditions require receiver index zero; bind a native model condition for model arguments");
+ if(p.selector=="isNil")return false;if(p.selector=="notNil")return true;if(p.selector=="isInteger")return model.kindOf("Integer");
+ Value result;if(p.arguments.empty())result=model.readSlot("MASelectorAccessor",p.selector);else if(p.arguments.size()==1)result=model.binaryMessage(p.selector,p.arguments[0],graph);else throw Error("Model condition requires an explicit multiargument native binding");
+ checkRuntimeValue(result,limits,work);auto b=std::get_if<bool>(&result.data);if(!b)throw Error("Model condition message must return Boolean");return *b;
+}
+}

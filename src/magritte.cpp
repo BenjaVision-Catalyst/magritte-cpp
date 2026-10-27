@@ -349,8 +349,6 @@ void supported(const Description &d) {
         else if (k != "default" && k != "undefinedValue" && k.rfind("metadata:", 0) != 0)
             throw Error("Unsupported semantic property: " + k);
     }
-    require(!d.isContainer() || d.portableConditions.empty(),
-            "Portable container conditions require a model message protocol");
     require(d.isContainer() || d.children.empty(), "Scalar cannot contain children");
     if (d.isReference())
         (void)detail::storedReference(d);
@@ -480,159 +478,8 @@ void NativeModel::writeUsing(const Description& d, Value v) {
     if (object_ && d.nativeWrite) d.nativeWrite(object_, v);
     else d.effectiveAccessor().write(*this, std::move(v), resolver);
 }
-namespace {
-bool kindOf(const Value& v, const std::string& kind, const Graph* graph) {
-    if (auto c = v.conflict())
-        return c->kindOf(kind);
-    if (auto r = std::get_if<Value::Reference>(&v.data)) {
-        require(graph, "Object reference validation requires a graph resolver"); return graph->resolve(*r).kindOf(kind);
-    }
-    if (v.data.index() == 12)
-        return ClassRegistry::global().includesBehavior("Fraction", kind);
-    if (v.isMutableCollection()) {
-      auto k = v.mutableCollection()->kind();
-      auto cls = k == "array"     ? "Array"
-                 : k == "ordered" ? "OrderedCollection"
-                 : k == "set"     ? "Set"
-                 : k == "bag"     ? "Bag"
-                                  : "String";
-      return ClassRegistry::global().includesBehavior(cls, kind);
-    }
-    static const char* types[]={"UndefinedObject","Boolean","Integer","String","Array",nullptr,"Character",nullptr,"Symbol","Float","Class"};
-    auto type=types[v.data.index()];std::string collection;
-    if(auto c=std::get_if<Value::Collection>(&v.data)){collection=c->kind=="ordered"?"OrderedCollection":c->kind=="set"?"Set":"Bag";type=collection.c_str();}
-    return type && ClassRegistry::global().includesBehavior(type,kind);
-}
-struct Budget {
-  Limits limits;
-  std::size_t work = 0;
-  std::set<const void *> collections;
-  void tick(std::size_t depth) {
-    require(++work <= limits.visits && depth <= limits.depth,
-            "Validation work/depth limit");
-  }
-};
-void checkReferences(const Value& v, const Graph* graph, Budget& budget, std::size_t depth) {
-    budget.tick(depth);
-    if (v.isMutableCollection()) {
-      if (!budget.collections.insert(v.mutableCollection()->identity()).second)
-        return;
-      checkReferences(v.mutableCollection()->snapshot(), graph, budget, depth);
-      return;
-    }
-    if (auto r = std::get_if<Value::Reference>(&v.data)) { require(graph, "Object references require a graph resolver"); (void)graph->resolve(*r); }
-    if (v.data.index() == 4 || v.data.index() == 7) {
-        require(v.collectionSize() <= budget.limits.visits - budget.work, "Collection work limit");
-        for (const auto& e : v.elements()) checkReferences(e, graph, budget, depth + 1);
-    }
-}
-std::vector<ValidationError> validateField(const Description&, const Value&, const Graph*, Budget&, std::size_t);
-std::vector<ValidationError> validateModel(const Description& d, const Model& model, const Graph* graph, Budget& budget, std::size_t depth) {
-    budget.tick(depth); supported(d); detail::checkPortableDescription(d,budget.limits,budget.work);
-    if (!d.flag("visible") || d.flag("readOnly")) return {};
-    if (!d.isContainer()) return validateField(d, model.readUsing(d), graph, budget, depth + 1);
-    require(d.conditions.empty(), "Container local conditions are not implemented");
-    std::vector<ValidationError> errors;
-    for (const auto& c : d.orderedChildren()) {
-        std::vector<ValidationError> e;
-        if (c->isContainer() && (model.usesStoredContainerValues() || c->nativeRead || ((c->accessor || c->accessorObject) && c->effectiveAccessor().className != "MAIdentityAccessor")))
-            e = validateField(*c, model.readUsing(*c), graph, budget, depth + 1);
-        else e = validateModel(*c, model, graph, budget, depth + 1);
-        errors.insert(errors.end(), e.begin(), e.end());
-    }
-    return errors;
-}
-std::vector<ValidationError> validateField(const Description& d, const Value& v, const Graph* graph, Budget& budget, std::size_t depth) {
-    budget.tick(depth); supported(d); detail::checkPortableDescription(d,budget.limits,budget.work);
-    std::vector<ValidationError> errors;
-    if (!d.flag("visible") || d.flag("readOnly")) return errors;
-    checkReferences(v, graph, budget, depth);
-    auto error = [&](std::string code) {
-        auto message = detail::validationMessage(d, code, budget.limits);
-        errors.push_back({d.id, std::move(code), std::move(message)});
-    };
-    if (d.flag("required") && (v.isNil() || (d.isMultiple() && v.isCollection() && v.collectionSize() == 0))) error("MARequiredError");
-    if (detail::valuesEqual(v, d.property("undefinedValue"), budget.limits,
-                            budget.work))
-      return errors;
-    if (d.isContainer()) {
-        require(graph, "Container value validation requires a graph resolver");
-        require(std::holds_alternative<Value::Reference>(v.data), "Container value requires object reference");
-        auto e = validateModel(d, graph->resolve(v), graph, budget, depth + 1); errors.insert(errors.end(), e.begin(), e.end()); return errors;
-    }
-    bool kind = true;
-    if ((d.isRelation() || d.isOption()) && d.properties.count("kind")) {
-        auto expected = d.property("kind");
-        require(expected.data.index() == 10, "Description kind is nil");
-        if (!kindOf(v, std::get<Value::Class>(expected.data).name, graph)) {
-            error("MAKindError");
-            return errors;
-        }
-    }
-    if (d.isRelation()) {
-        auto check = [&](const Value& e) {
-            budget.tick(depth);
-            bool accepted = false;
-            for (const auto& cls : d.classes) { budget.tick(depth); if (kindOf(e, cls, graph)) accepted = true; }
-            if (!accepted) { error("MAKindError"); kind = false; }
-        };
-        if (d.isMultiple()) {
-            if (!v.isCollection()) { error("MAKindError"); kind = false; }
-            else {
-                require(v.collectionSize() <= budget.limits.visits - budget.work, "Collection work limit");
-                for (const auto& e : v.elements()) check(e);
-            }
-        } else check(v);
-    } else if (d.isOption()) {
-        auto check = [&](const Value& e) {
-            bool member = false;
-            if (d.options.isDynamic()) { budget.tick(depth); member = d.options.provider()->includes(e, budget.limits);
-            } else
-              for (const auto &option : d.options.values(budget.limits)) {
-                budget.tick(depth);
-                if (detail::valuesEqual(e, option, budget.limits,
-                                        budget.work)) {
-                  member = true;
-                  break;
-                }
-              }
-            if (member) return;
-            if (!d.flag("extensible")) { error("MAKindError"); kind = false; return; }
-            auto nested = validateField(*d.referenceDescription(), e, graph, budget, depth + 1);
-            if (!nested.empty()) kind = false;
-            errors.insert(errors.end(), nested.begin(), nested.end());
-        };
-        if (d.isMultiple()) {
-            if (!v.isCollection()) { error("MAKindError"); kind = false; }
-            else {
-                require(v.collectionSize() <= budget.limits.visits - budget.work, "Collection work limit");
-                for (const auto& e : v.elements()) check(e);
-            }
-        } else check(v);
-    } else {
-        auto expected = d.property("kind");
-        require(expected.data.index() == 10, "Description kind is nil");
-        kind = kindOf(v, std::get<Value::Class>(expected.data).name, graph);
-        if (!kind) error("MAKindError");
-    }
-    if (!kind) return errors;
-    if (detail::descriptionIs(d, "MANumberDescription")) {
-        auto min = d.property("min"), max = d.property("max");
-        if ((!min.isNil() && detail::compareNumbers(v, min) < 0) || (!max.isNil() && detail::compareNumbers(v, max) > 0)) error("MARangeError");
-    }
-    for (const auto& c : d.portableConditions) {
-        if (!detail::evaluatePredicate(c.predicate, v, budget.limits, budget.work)) errors.push_back({d.id, "MAConditionError", c.label});
-    }
-    for (const auto& c : d.conditions) {
-        budget.tick(depth); require(bool(c.test), "Missing local condition function");
-        if (!c.test(v)) errors.push_back({d.id, "MAConditionError", c.label});
-    }
-    return errors;
-}
-}
-std::vector<ValidationError> validateValue(const Description& d, const Value& v, const Graph* graph, Limits l) {
-  Budget budget{l, 0, {}};
-  return validateField(d, v, graph, budget, 0);
+std::vector<ValidationError> validateValue(const Description& d, const Value& v, const Graph* g, Limits l) {
+    return validateValueDetailed(d,v,g,l).flatErrors(l);
 }
 void visit(const Description& root, const std::function<void(const Description&)>& f, Limits l) {
     std::set<const Description*> active, composed, seen;
@@ -656,11 +503,8 @@ void visit(const Description& root, const std::function<void(const Description&)
     };
     walk(root, 0);
 }
-std::vector<ValidationError> validate(const Description& root, const Model& model, Limits l, const Graph* graph) {
-    std::size_t work=0;
-    visit(root, [&](const auto& d) { supported(d); detail::checkPortableDescription(d,l,work); }, l);
-    Budget budget{l, work, {}};
-    return validateModel(root, model, graph, budget, 0);
+std::vector<ValidationError> validate(const Description& d, const Model& m, Limits l, const Graph* g) {
+    return validateDetailed(d,m,l,g).flatErrors(l);
 }
 Predicate decodePredicate(const std::string& s,Limits l) { try { return predicateValue(parse(s,l),l); } catch(const J::exception& e){throw Error(e.what());} }
 std::string encodePredicate(const Predicate& p,Limits l) { p.check(l);auto s=predicateWire(p,l).dump();(void)decodePredicate(s,l);return s; }

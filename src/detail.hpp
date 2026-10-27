@@ -28,8 +28,10 @@ bool valuesEqual(const Value &, const Value &, Limits, std::size_t &,
 void checkRuntimeValue(const Value &, Limits, std::size_t &,
                        std::size_t depth = 0);
 void checkLocalValue(const Value &, Limits = {});
-std::string validationMessage(const Description &, const std::string &code, Limits = {});
+std::optional<std::string> validationMessage(const Description &, const std::string &code, Limits = {});
 std::string displayString(const Value&);
 bool portableLabelKey(const Value&);
 std::string valueKey(const Value&, Limits, std::size_t&, std::size_t depth = 0);
 }
+
+namespace magritte::detail { bool evaluateModelPredicate(const Predicate &, const Model &, const Graph *, Limits, std::size_t &); }

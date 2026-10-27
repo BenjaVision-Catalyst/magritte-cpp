@@ -62,7 +62,7 @@ Description &Description::setRangeErrorMessage(Value v, Limits l) {
     return put(*this, "rangeErrorMessage", std::move(v), l);
 }
 namespace detail {
-std::string validationMessage(const Description &d, const std::string &code, Limits limits) {
+std::optional<std::string> validationMessage(const Description &d, const std::string &code, Limits limits) {
     Value value;
     if (code == "MARequiredError")
         value = d.requiredErrorMessage(limits);
@@ -75,8 +75,8 @@ std::string validationMessage(const Description &d, const std::string &code, Lim
     else
         throw Error("Unsupported description error message");
     auto s = std::get_if<std::string>(&value.data);
-    if (!s)
-        throw Error("Nil error text has no String ValidationError representation");
+    if(value.isNil())return {};
+    if(!s)throw Error("Error message must be String or nil");
     return *s;
 }
 } // namespace detail

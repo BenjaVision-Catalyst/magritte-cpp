@@ -181,8 +181,11 @@ int main(int argc, char **argv) {
         model.values["first"] = Value("A");
         model.values["last"] = Value("Z");
         check(writeString(*container, model) == edges.at("containerText"), "GT hidden container separators");
-        for (const auto &c : J::parse(file("portable-invalid.json")))
-            rejects([&] { Graph::decode(c.at("graph").dump()); }, c.at("name"));
+        for (const auto &c : J::parse(file("portable-invalid.json"))) {
+            if(c.at("name")=="container condition model protocol"){
+                auto accepted=Graph::decode(c.at("graph").dump());check(!accepted.descriptions.at(accepted.root)->portableConditions.empty(),"Former container-condition boundary now supported");
+            }else rejects([&] { Graph::decode(c.at("graph").dump()); }, c.at("name"));
+        }
         auto encoded = g.encode();
         check(Graph::decode(encoded).encode() == encoded, "v3 graph fixed point");
         auto &sample = g.objects.at("sample");

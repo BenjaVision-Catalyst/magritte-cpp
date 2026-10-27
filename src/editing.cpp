@@ -89,9 +89,10 @@ std::vector<std::shared_ptr<Description>> Memento::fields() const {
     }
     return result;
 }
-std::vector<ValidationError> Memento::validate() {
-    return magritte::validate(*description_, *this, limits_, graph_);
+ValidationResult Memento::validateDetailed() {
+    return magritte::validateDetailed(*description_, *this, limits_, graph_);
 }
+std::vector<ValidationError> Memento::validate() {return validateDetailed().flatErrors(limits_);}
 Value StraightMemento::readUsing(const Description &d) const {
     auto value = model_.readUsing(d);
     if (value.isNil())
@@ -243,11 +244,10 @@ bool CheckedMemento::shouldPush(const Entry &entry, const Value &current, std::s
     return detail::shouldWrite(*entry.description, actual->second.value, original->second, limits_, work) &&
            CachedMemento::shouldPush(entry, current, work);
 }
-std::vector<ValidationError> CheckedMemento::validate() {
-    if (!hasConflict())
-        return Memento::validate();
+ValidationResult CheckedMemento::validateDetailed() {
+    if (!hasConflict()) return Memento::validateDetailed();
     reset();
-    return {{description_->id, "MAConflictError",
-             detail::validationMessage(*description_, "MAConflictError", limits_)}};
+    return {std::make_shared<ValidationIssue>(*description_,"MAConflictError",detail::validationMessage(*description_,"MAConflictError",limits_))};
 }
+std::vector<ValidationError> CheckedMemento::validate() {return validateDetailed().flatErrors(limits_);}
 } // namespace magritte

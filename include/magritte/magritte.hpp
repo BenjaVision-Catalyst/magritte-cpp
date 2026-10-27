@@ -158,8 +158,48 @@ struct CompositeConflict final {
         const std::function<bool(const std::string &kind, const std::string &selector)>
             &canUnderstand) const;
 };
+struct Description;
 struct ValidationError {
     std::string descriptionId, code, message;
+};
+// Native error objects retain owned description tags; stack descriptions remain borrowed.
+class ValidationIssue {
+    std::shared_ptr<const Description> owner_;
+public:
+    const Description *const tag;
+    const std::string code;
+    const std::optional<std::string> signalText;
+    const std::vector<std::shared_ptr<ValidationIssue>> collection;
+    ValidationIssue(const Description &, std::string, std::optional<std::string>,
+                    std::vector<std::shared_ptr<ValidationIssue>> = {});
+    bool isResumable() const { return true; }
+    bool kindOf(const std::string &) const;
+    std::string messageText() const { return signalText.value_or(""); }
+    std::string printString(Limits = {}) const;
+};
+struct ValidationResult {
+    std::shared_ptr<ValidationIssue> error;
+    bool passed() const { return !error; }
+    std::vector<ValidationError> flatErrors(Limits = {}) const;
+    void raiseIfInvalid() const;
+};
+class ValidationFailure : public Error {
+public:
+    const std::shared_ptr<ValidationIssue> error;
+    explicit ValidationFailure(std::shared_ptr<ValidationIssue>);
+};
+class ValidationContext {
+    const Description &description_;
+    Limits limits_;
+    std::vector<std::shared_ptr<ValidationIssue>> errors_;
+public:
+    using Block = std::function<void(ValidationContext &)>;
+    explicit ValidationContext(const Description &, Limits = {});
+    std::shared_ptr<ValidationIssue> signal(std::string, std::optional<std::string>);
+    void include(const ValidationResult &);
+    void tryValidation(const Block &, const Block &ifPass);
+    ValidationResult finish() const;
+    std::size_t size() const { return errors_.size(); }
 };
 struct AccessorObject;
 struct ConditionObject;
@@ -298,8 +338,14 @@ struct Predicate {
 };
 struct PortableCondition { std::string label; Predicate predicate; };
 struct Condition {
-    std::string label;
+    std::optional<std::string> label;
     std::function<bool(const Value&)> test;
+    std::function<bool(const Model&)> modelTest;
+    Condition() = default;
+    Condition(std::optional<std::string> label, std::function<bool(const Value&)> test) : label(std::move(label)), test(std::move(test)) {}
+    static Condition onModel(std::optional<std::string> label, std::function<bool(const Model&)> test) {
+        Condition c;c.label=std::move(label);c.modelTest=std::move(test);return c;
+    }
 };
 class Visitor;
 namespace detail {
@@ -559,6 +605,7 @@ public:
     bool usesStoredContainerValues() const override { return true; }
     virtual void reset() = 0;
     virtual void commit() = 0; // Does not implicitly validate or provide a transaction.
+    virtual ValidationResult validateDetailed();
     virtual std::vector<ValidationError> validate();
 };
 class StraightMemento final : public Memento {
@@ -602,6 +649,7 @@ public:
     bool hasModelChangedElsewhere() const;
     bool hasConflict() const;
     void reset() override;
+    ValidationResult validateDetailed() override;
     std::vector<ValidationError> validate() override;
 };
 // Expanded, class-specific metadata descriptions using upstream selector accessors.
@@ -943,6 +991,10 @@ Accessor decodeAccessor(const std::string&, Limits = {});
 std::string encodeAccessor(const Accessor&, Limits = {});
 Value decodeValue(const std::string&, Limits = {});
 std::string encodeValue(const Value&, Limits = {});
+ValidationResult validateValueDetailed(const Description &, const Value &, const Graph * = nullptr, Limits = {});
+ValidationResult validateDetailed(const Description &, const Model &, Limits = {}, const Graph * = nullptr);
+bool isSatisfiedBy(const Description &, const Value &, const Graph * = nullptr, Limits = {});
+bool isSatisfiedBy(const Description &, const Model &, Limits = {}, const Graph * = nullptr);
 std::vector<ValidationError> validateValue(const Description&, const Value&, const Graph* = nullptr, Limits = {});
 std::vector<ValidationError> validate(const Description&, const Model&, Limits = {}, const Graph* = nullptr);
 // Walk composition and reference edges once; recursive references terminate.

@@ -63,7 +63,18 @@ struct ClassRegistry::State {
 };
 ClassRegistry::ClassRegistry() : state_(std::make_unique<State>()) {
     registerClasses(
-        {{"Array", "ArrayedCollection", false, "Array"},
+        {{"Exception","Object"},
+{"Error","Exception"},
+{"GRError","Error"},
+{"MAError","GRError"},
+{"MAValidationError","MAError"},
+{"MAMultipleErrors","MAValidationError"},
+{"MARequiredError","MAValidationError"},
+{"MAKindError","MAValidationError"},
+{"MARangeError","MAValidationError"},
+{"MAConditionError","MAValidationError"},
+{"MAConflictError","MAValidationError"},
+{"Array", "ArrayedCollection", false, "Array"},
          {"ArrayedCollection", "SequenceableCollection", true, "Arrayed Collection"},
          {"Bag", "Collection", false, "Bag"},
          {"Behavior", "Object", false, "Behavior"},

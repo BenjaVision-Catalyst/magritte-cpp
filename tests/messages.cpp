@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
         check(&text.setConflictErrorMessage(Value("conflict")) == &text);
         text.setKindErrorMessage(Value());
         check(text.kindErrorMessage().isNil());
-        fails([&] { validateValue(text, Value(true)); });
+        check(validateValue(text, Value(true)).at(0).message.empty());
         check(validateValue(text, Value("ok")).empty());
         text.properties["visible"] = Value(false);
         check(validateValue(text, Value(true)).empty());
@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
         root->setConflictErrorMessage(Value());
         editor.writeUsing(*field, Value("local2"));
         model.values[field->id] = Value("remote2");
-        fails([&] { editor.validate(); });
+        check(editor.validate().at(0).message.empty());
         check(editor.readUsing(*field) == Value("remote2") && !editor.hasChanges());
         // Metadata selectors, independent copies, legacy gates and portable snapshots.
         root->setConflictErrorMessage(Value("concurrent"));
