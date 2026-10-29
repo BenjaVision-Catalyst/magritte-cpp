@@ -110,3 +110,16 @@ Container mutation, native vectors/arrays, explicit priority resort and stored-o
 Mutable collection ownership, shallow-copy boundaries and graph identity tables are documented in [mutable collections](docs/mutable-collections.md).
 
 Source validation order, native results, model conditions and error ownership are documented in [validation](docs/validation.md).
+
+## Unreal and older Apple deployment targets
+
+The public header supports consumers built without RTTI through explicit native
+model/accessor bindings. RTTI-based `registerNativeClass<T>` and `NativeModel::registered`
+remain available when RTTI is enabled; they are deliberately unavailable otherwise.
+`magritte-no-rtti-conformance` compiles and executes a consumer with RTTI disabled.
+
+On Apple platforms, the existing bounded decimal reader uses an explicit C numeric
+locale without changing process state. This avoids the macOS/iOS26 deployment
+requirement of floating-point `std::from_chars`; finite subnormal values remain
+supported, and overflow/underflow-to-zero fail closed. Native model, reflection and
+portable conformance checks pass with a macOS14 deployment target.

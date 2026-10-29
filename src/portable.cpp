@@ -2,6 +2,11 @@
 #include "detail.hpp"
 #include <algorithm>
 #include <charconv>
+#if defined(__APPLE__)
+#include <cerrno>
+#include <cstdlib>
+#include <xlocale.h>
+#endif
 #include <cmath>
 #include <cstring>
 #include <magritte/magritte.hpp>
@@ -499,8 +504,23 @@ Value read(const Description &d, const std::string &input, Work &w, std::size_t 
             return Value(n);
         }
         double n;
+#if defined(__APPLE__)
+        // Apple's floating from_chars requires macOS/iOS26. Keep the explicit,
+        // already-validated decimal grammar on older deployment targets without
+        // changing the process locale or accepting overflow/underflow-to-zero.
+        locale_t locale = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+        need(locale != nullptr, "MAReadError: numeric locale unavailable");
+        char *end = nullptr;
+        errno = 0;
+        n = strtod_l(s.c_str(), &end, locale);
+        const int failure = errno;
+        freelocale(locale);
+        need(end == s.c_str() + s.size() && (failure != ERANGE || n != 0.0) && std::isfinite(n),
+             "MAReadError: float outside finite binary64");
+#else
         auto r = std::from_chars(s.data(), s.data() + s.size(), n);
         need(r.ec == std::errc{} && std::isfinite(n), "MAReadError: float outside finite binary64");
+#endif
         return Value(n);
     }
     if (detail::descriptionIs(d, "MASingleOptionDescription")) {

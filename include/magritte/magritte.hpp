@@ -130,7 +130,11 @@ public:
     void registerClass(ClassInfo);
     void registerClasses(const std::vector<ClassInfo>&); // Atomic, including forward superclass references.
     void registerNativeClass(std::type_index, ClassInfo);
+#if defined(__cpp_rtti) || defined(_CPPRTTI)
     template<class T> void registerNativeClass(ClassInfo info) { registerNativeClass(std::type_index(typeid(T)), std::move(info)); }
+#else
+    template<class T> void registerNativeClass(ClassInfo) = delete; // Use explicit class/selector bindings without RTTI.
+#endif
     std::optional<std::string> classForNativeType(std::type_index) const;
     std::optional<ClassInfo> find(const std::string&) const;
     std::vector<std::string> allClasses() const;
@@ -563,6 +567,7 @@ public:
     void writeSlot(const std::string&, const std::string&, Value) override;
     // Caller retains ownership and must outlive this adapter and every access.
     explicit NativeModel(void* object, std::vector<std::string> classes = {}) : object_(object), classes_(std::move(classes)) {}
+#if defined(__cpp_rtti) || defined(_CPPRTTI)
     template<class T> static NativeModel registered(T* object) {
         if (!object) throw Error("Null registered native object");
         auto name=ClassRegistry::global().classForNativeType(std::type_index(typeid(*object)));
@@ -571,6 +576,9 @@ public:
         if constexpr(std::is_polymorphic<T>::value) pointer=dynamic_cast<void*>(object);
         return NativeModel(pointer,{*name});
     }
+#else
+    template<class T> static NativeModel registered(T*) = delete;
+#endif
     bool kindOf(const std::string&) const override;
     Value readUsing(const Description&) const override;
     void writeUsing(const Description&, Value) override;
